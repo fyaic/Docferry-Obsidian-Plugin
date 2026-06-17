@@ -1,0 +1,57 @@
+name: Release Obsidian plugin
+
+on:
+  push:
+    tags:
+      - "*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: plugin/package-lock.json
+
+      - name: Install plugin dependencies
+        working-directory: plugin
+        run: npm ci
+
+      - name: Build plugin
+        working-directory: plugin
+        run: npm run build
+
+      - name: Check version
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          manifest_version="$(node -p "require('./manifest.json').version")"
+          plugin_manifest_version="$(node -p "require('./plugin/manifest.json').version")"
+          test "$tag" = "$manifest_version"
+          test "$tag" = "$plugin_manifest_version"
+
+      - name: Stage release artifacts
+        shell: bash
+        run: |
+          mkdir -p release
+          cp plugin/main.js release/main.js
+          cp plugin/styles.css release/styles.css
+          cp manifest.json release/manifest.json
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/main.js
+            release/manifest.json
+            release/styles.css

@@ -1,0 +1,92 @@
+.docferry-plugin-header {
+  align-items: center;
+  border-bottom: 1px solid var(--background-modifier-border);
+  display: flex;
+  gap: 16px;
+  margin: 0 0 18px;
+  padding: 0 0 18px;
+}
+
+.docferry-plugin-logo {
+  align-items: center;
+  background: var(--background-secondary);
+  border-radius: 8px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 52px;
+  justify-content: center;
+  overflow: hidden;
+  width: 52px;
+}
+
+.docferry-plugin-logo img {
+  display: block;
+  height: 48px;
+  object-fit: contain;
+  width: 48px;
+}
+
+.docferry-plugin-header-copy {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  text-align: left;
+}
+
+.docferry-plugin-header-copy h2 {
+  font-size: 1.35rem;
+  letter-spacing: 0;
+  line-height: 1.2;
+  margin: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.docferry-plugin-header-copy p {
+  color: var(--text-muted);
+  margin: 4px 0 0;
+  text-align: left;
+  width: 100%;
+}
+
+.docferry-title-input,
+.docferry-url-input {
+  min-width: min(30rem, 100%);
+}
+
+.docferry-settings-tab {
+  max-width: 980px;
+}
+
+.docferry-settings-tab .setting-item {
+  align-items: flex-start;
+  gap: 18px;
+}
+
+.docferry-settings-tab .setting-item-info {
+  flex: 1 1 28rem;
+  min-width: 0;
+}
+
+.docferry-settings-tab .setting-item-control {
+  flex: 0 1 20rem;
+  justify-content: flex-start;
+}
+
+.docferry-settings-tab .setting-item-control input[type="text"],
+.docferry-settings-tab .setting-item-control input[type="password"],
+.docferry-settings-tab .setting-item-control select {
+  max-width: 20rem;
+  width: 100%;
+}
+
+@media (max-width: 760px) {
+  .docferry-settings-tab .setting-item {
+    flex-direction: column;
+  }
+
+  .docferry-settings-tab .setting-item-control {
+    width: 100%;
+  }
+}

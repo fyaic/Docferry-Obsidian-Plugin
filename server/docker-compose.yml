@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: docferry
+      POSTGRES_USER: docferry
+      POSTGRES_PASSWORD: docferry
+    ports:
+      - "5432:5432"
+    volumes:
+      - docferry_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docferry -d docferry"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  docferry_pgdata:

@@ -1,0 +1,26 @@
+{
+  "name": "docferry",
+  "version": "0.0.6",
+  "description": "Obsidian plugin for publishing one note to a secure DocFerry share link.",
+  "homepage": "https://bondie.io/research/docferry",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit && node esbuild.config.mjs production"
+  },
+  "keywords": [
+    "obsidian",
+    "share",
+    "publish",
+    "markdown"
+  ],
+  "author": "Bondie Labs",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "builtin-modules": "^3.3.0",
+    "esbuild": "^0.28.1",
+    "obsidian": "latest",
+    "typescript": "^5.4.5"
+  }
+}

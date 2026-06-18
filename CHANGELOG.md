@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.8
+
+- Replace `window.confirm` with an Obsidian `Modal`-based confirmation dialog.
+- Use `activeDocument` instead of `document` for hidden preview rendering and theme CSS capture.
+- Tighten TypeScript catch-variable typing with `useUnknownInCatchVariables`; remove unused `_error` bindings.
+- Add `as unknown` casts around `JSON.parse` for strict ESLint rules.
+- Keep GitHub release notes and artifact attestations for release assets.
+
 ## 0.0.7
 
 - Add GitHub release notes and artifact attestations for release assets.

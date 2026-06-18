@@ -1,4 +1,5 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, setIcon } from "obsidian";
+import { ConfirmModal } from "./confirm-modal";
 import { DOCFERRY_PRODUCT_NAME, renderDocferryHeader } from "./brand";
 import { clearShareMeta, readShareMeta } from "./frontmatter";
 import {
@@ -98,6 +99,14 @@ function isImageUploadQuality(value: unknown): value is ImageUploadQuality {
   return value === "original" || value === "high" || value === "standard";
 }
 
+function isDocferryServiceMode(value: unknown): value is DocferryServiceMode {
+  return value === "cloud" || value === "custom";
+}
+
+function asServiceMode(value: string): DocferryServiceMode {
+  return isDocferryServiceMode(value) ? value : "cloud";
+}
+
 export interface SettingsHost {
   settings: DocferrySettings;
   saveSettings(): Promise<void>;
@@ -136,6 +145,10 @@ export class DocferrySettingTab extends PluginSettingTab {
   }
 
   display(): void {
+    this.renderSettings();
+  }
+
+  private renderSettings(): void {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass("docferry-settings-tab");
@@ -150,42 +163,43 @@ export class DocferrySettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName(this.t("settings.serviceMode.name"))
       .setDesc(this.t("settings.serviceMode.desc"))
-      .addDropdown((dropdown) =>
+      .addDropdown((dropdown) => {
         dropdown
           .addOption("cloud", this.t("settings.serviceMode.cloud"))
           .addOption("custom", this.t("settings.serviceMode.custom"))
           .setValue(this.host.settings.serviceMode)
           .onChange(async (value) => {
-            this.host.settings.serviceMode = value as DocferryServiceMode;
+            this.host.settings.serviceMode = asServiceMode(value);
             await this.host.saveSettings();
-            this.display();
-          })
-      );
+            this.renderSettings();
+          });
+      });
 
     new Setting(containerEl)
       .setName(this.t("settings.privacy.name"))
       .setDesc(this.t("settings.privacy.desc"))
-      .addButton((button) =>
+      .addButton((button) => {
         button
           .setButtonText(this.t("settings.privacy.button"))
           .onClick(() => {
             window.open(DOCFERRY_PRIVACY_URL);
-          })
-      );
+          });
+      });
 
     if (this.host.settings.serviceMode !== "cloud") {
       new Setting(containerEl)
         .setName(this.t("settings.serverUrl.name"))
         .setDesc(this.t("settings.serverUrl.desc"))
-        .addText((text) =>
+        .addText((text) => {
           text
+            // eslint-disable-next-line obsidianmd/ui/sentence-case -- URL placeholder, not user-facing sentence
             .setPlaceholder("http://127.0.0.1:8787")
             .setValue(this.host.settings.serverUrl)
             .onChange(async (value) => {
               this.host.settings.serverUrl = value.trim();
               await this.host.saveSettings();
-            })
-        );
+            });
+        });
     }
 
     if (this.host.settings.serviceMode === "cloud") {
@@ -196,20 +210,20 @@ export class DocferrySettingTab extends PluginSettingTab {
             ? this.t("settings.cloud.connectedDesc")
             : this.t("settings.cloud.disconnectedDesc")
         )
-        .addButton((button) =>
+        .addButton((button) => {
           button
             .setButtonText(this.host.settings.apiToken ? this.t("settings.cloud.reconnect") : this.t("settings.cloud.connect"))
             .setCta()
             .onClick(async () => {
               await this.host.connectDocferryCloud();
-              this.display();
-            })
-        )
-        .addButton((button) =>
+              this.renderSettings();
+            });
+        })
+        .addButton((button) => {
           button.setButtonText(this.t("settings.cloud.learn")).onClick(() => {
             window.open(DOCFERRY_CLOUD_HELP_URL);
-          })
-        );
+          });
+        });
 
       const advancedEl = containerEl.createEl("details", { cls: "docferry-advanced-token" });
       advancedEl.createEl("summary", { text: this.t("settings.advancedToken.summary") });
@@ -220,6 +234,7 @@ export class DocferrySettingTab extends PluginSettingTab {
       tokenSetting.addText((text) => {
         text.inputEl.type = "password";
         text
+          // eslint-disable-next-line obsidianmd/ui/sentence-case -- token prefix placeholder, not a sentence
           .setPlaceholder("dfc_...")
           .setValue(this.host.settings.apiToken)
           .onChange(async (value) => {
@@ -247,30 +262,30 @@ export class DocferrySettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName(this.t("settings.testConnection.name"))
       .setDesc(this.t("settings.testConnection.desc"))
-      .addButton((button) =>
+      .addButton((button) => {
         button
           .setButtonText(this.t("settings.testConnection.button"))
           .onClick(async () => {
             await this.host.testConnection();
-          })
-      );
+          });
+      });
 
     new Setting(containerEl)
       .setName(this.t("settings.passwordDefault.name"))
       .setDesc(this.t("settings.passwordDefault.desc"))
-      .addToggle((toggle) =>
+      .addToggle((toggle) => {
         toggle
           .setValue(this.host.settings.defaultPasswordEnabled)
           .onChange(async (value) => {
             this.host.settings.defaultPasswordEnabled = value;
             await this.host.saveSettings();
-          })
-      );
+          });
+      });
 
     new Setting(containerEl)
       .setName(this.t("settings.defaultExpiration.name"))
       .setDesc(this.t("settings.defaultExpiration.desc"))
-      .addDropdown((dropdown) =>
+      .addDropdown((dropdown) => {
         dropdown
           .addOption("never", this.t("settings.expiration.never"))
           .addOption("30", this.t("settings.expiration.thirtyDays"))
@@ -278,8 +293,8 @@ export class DocferrySettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.host.settings.defaultExpiresInDays = value;
             await this.host.saveSettings();
-          })
-      );
+          });
+      });
 
     new Setting(containerEl)
       .setName(this.t("settings.imageQuality.name"))
@@ -288,13 +303,13 @@ export class DocferrySettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName(this.t("settings.debug.name"))
       .setDesc(this.t("settings.debug.desc"))
-      .addToggle((toggle) =>
+      .addToggle((toggle) => {
         toggle.setValue(this.host.settings.debug).onChange(async (value) => {
           this.host.settings.debug = value;
           await this.host.saveSettings();
           new Notice(value ? this.t("settings.debug.enabled") : this.t("settings.debug.disabled"));
-        })
-      );
+        });
+      });
 
     const shareManagementEl = containerEl.createDiv({ cls: "docferry-share-management" });
     void this.renderShareManagement(shareManagementEl);
@@ -311,13 +326,17 @@ export class DocferrySettingTab extends PluginSettingTab {
       }
     });
     setIcon(button, "globe-2");
-    button.addEventListener("click", async () => {
-      this.host.settings.language = nextLanguage(this.host.settings.language);
-      await this.host.saveSettings();
-      this.host.refreshLocalizedCommands?.();
-      new Notice(this.t(languageChangedKey(this.host.settings.language)));
-      this.display();
+    button.addEventListener("click", () => {
+      void this.switchLanguage();
     });
+  }
+
+  private async switchLanguage(): Promise<void> {
+    this.host.settings.language = nextLanguage(this.host.settings.language);
+    await this.host.saveSettings();
+    this.host.refreshLocalizedCommands?.();
+    new Notice(this.t(languageChangedKey(this.host.settings.language)));
+    this.renderSettings();
   }
 
   private async renderShareManagement(sectionEl: HTMLElement): Promise<void> {
@@ -332,7 +351,7 @@ export class DocferrySettingTab extends PluginSettingTab {
       for (const share of serverShares) {
         this.shareStatusCache.set(share.share_id, { status: share });
       }
-    } catch (error: unknown) {
+    } catch (error) {
       listError = this.errorMessage(error);
     }
 
@@ -466,7 +485,7 @@ export class DocferrySettingTab extends PluginSettingTab {
     });
     copyButton.disabled = !shareUrl;
 
-    const openShareButton = this.createActionButton(actionsEl, this.t("shares.openShare"), async () => {
+    const openShareButton = this.createActionButton(actionsEl, this.t("shares.openShare"), () => {
       if (shareUrl) window.open(shareUrl);
     });
     openShareButton.disabled = !shareUrl;
@@ -479,7 +498,12 @@ export class DocferrySettingTab extends PluginSettingTab {
 
     const stopButton = this.createActionButton(actionsEl, this.t("shares.stop"), async () => {
       if (!share.shareId) return;
-      if (!window.confirm(this.t("shares.confirmStop", { title }))) return;
+      const confirmed = await new ConfirmModal(
+        this.app,
+        this.t("shares.confirmStop", { title }),
+        (key, values) => this.t(key, values)
+      ).openAndConfirm();
+      if (!confirmed) return;
       const stopped = await this.host.stopShareById(share.shareId, share.file);
       if (stopped) {
         this.shareStatusCache.delete(share.shareId);
@@ -491,7 +515,12 @@ export class DocferrySettingTab extends PluginSettingTab {
     if (share.file && share.localTracked) {
       this.createActionButton(actionsEl, this.t("shares.removeLocalRecord"), async () => {
         if (!share.file) return;
-        if (!window.confirm(this.t("shares.confirmRemoveLocal", { title: share.file.basename }))) return;
+        const confirmed = await new ConfirmModal(
+          this.app,
+          this.t("shares.confirmRemoveLocal", { title: share.file.basename }),
+          (key, values) => this.t(key, values)
+        ).openAndConfirm();
+        if (!confirmed) return;
         await clearShareMeta(this.app, share.file);
         if (share.shareId) this.shareStatusCache.delete(share.shareId);
         new Notice(this.t("shares.localRecordRemoved"));
@@ -509,7 +538,7 @@ export class DocferrySettingTab extends PluginSettingTab {
     try {
       const status = await this.host.refreshShareStatus(shareId);
       this.shareStatusCache.set(shareId, { status });
-    } catch (error: unknown) {
+    } catch (error) {
       this.shareStatusCache.set(shareId, { error: this.errorMessage(error) });
     }
   }
@@ -522,7 +551,7 @@ export class DocferrySettingTab extends PluginSettingTab {
   private createActionButton(
     containerEl: HTMLElement,
     label: string,
-    onClick: () => Promise<void>
+    onClick: () => void | Promise<void>
   ): HTMLButtonElement {
     const button = containerEl.createEl("button", { text: label });
     button.type = "button";

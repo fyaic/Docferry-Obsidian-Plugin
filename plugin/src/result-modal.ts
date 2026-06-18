@@ -22,17 +22,17 @@ export class ResultModal extends Modal {
     new Setting(contentEl)
       .setName(this.t("modal.result.url"))
       .setDesc(this.url)
-      .addButton((button) =>
+      .addButton((button) => {
         button.setButtonText(this.t("modal.result.copy")).onClick(async () => {
           await navigator.clipboard.writeText(this.url);
           new Notice(this.t("modal.result.linkCopied"));
-        })
-      )
-      .addButton((button) =>
+        });
+      })
+      .addButton((button) => {
         button.setButtonText(this.t("modal.result.open")).onClick(() => {
           window.open(this.url);
-        })
-      );
+        });
+      });
 
     new Setting(contentEl).setName(this.t("modal.result.updated")).setDesc(this.updatedAt);
 

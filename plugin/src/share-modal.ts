@@ -67,26 +67,26 @@ export class ShareModal extends Modal {
     new Setting(contentEl)
       .setName(this.t("modal.share.passwordProtection"))
       .setDesc(this.t("modal.share.passwordProtectionDesc"))
-      .addToggle((toggle) =>
+      .addToggle((toggle) => {
         toggle.setValue(this.passwordEnabled).onChange((value) => {
           this.passwordEnabled = value;
           renderPassword();
-        })
-      );
+        });
+      });
 
     renderPassword();
 
     new Setting(contentEl)
       .setName(this.t("modal.share.expires"))
-      .addDropdown((dropdown) =>
+      .addDropdown((dropdown) => {
         dropdown
           .addOption("never", this.t("settings.expiration.never"))
           .addOption("30", this.t("settings.expiration.thirtyDays"))
           .setValue(this.expiresInDays)
           .onChange((value) => {
             this.expiresInDays = value;
-          })
-      );
+          });
+      });
 
     const buttons = contentEl.createDiv({ cls: "modal-button-container" });
     buttons.createEl("button", { text: this.t("modal.share.cancel") }).addEventListener("click", () => {

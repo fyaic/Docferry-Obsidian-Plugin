@@ -1,4 +1,4 @@
-import { MarkdownRenderer, MarkdownView, Notice, Plugin, TFile, normalizePath, type Command } from "obsidian";
+import { Component, MarkdownRenderer, MarkdownView, Notice, Plugin, TFile, normalizePath, type Command } from "obsidian";
 import { ShareApiClient, ShareApiError } from "./api-client";
 import { clearShareMeta, readShareMeta, writeShareMeta } from "./frontmatter";
 import { ImportShareModal, type ImportShareOptions } from "./import-share-modal";
@@ -238,7 +238,7 @@ export default class DocferryPlugin extends Plugin {
       notice.hide();
       new Notice(this.t("notice.connectedCloud", { quota }));
       return true;
-    } catch (error: unknown) {
+    } catch (error) {
       notice.hide();
       new Notice(this.formatCloudConnectionError(error));
       return false;
@@ -290,7 +290,7 @@ export default class DocferryPlugin extends Plugin {
             quota: account.account.active_shares
           })
         );
-      } catch (error: unknown) {
+      } catch (error) {
         if (error instanceof ShareApiError && error.status === 404) {
           await this.api.validateAuthToken();
           new Notice(this.t("notice.connectedServerTokenValid", { service: health.service, version: health.version }));
@@ -298,7 +298,7 @@ export default class DocferryPlugin extends Plugin {
         }
         throw error;
       }
-    } catch (error: unknown) {
+    } catch (error) {
       if (error instanceof ShareApiError && error.status === 401) {
         const credentialName =
           this.settings.serviceMode === "cloud" ? this.t("notice.credentialCloud") : this.t("notice.credentialServer");
@@ -323,7 +323,7 @@ export default class DocferryPlugin extends Plugin {
       if (file) await clearShareMeta(this.app, file);
       new Notice(this.t("notice.sharingStopped"));
       return true;
-    } catch (error: unknown) {
+    } catch (error) {
       new Notice(this.formatError(error, this.t("notice.stopSharingFailed")));
       return false;
     }
@@ -392,7 +392,7 @@ export default class DocferryPlugin extends Plugin {
       new Notice(this.t("notice.shareLinkCopied"));
       new ResultModal(this.app, options.title, response.url, response.updated_at, makeTranslator(this.settings.language)).open();
       this.debug("publish response", response);
-    } catch (error: unknown) {
+    } catch (error) {
       notice.hide();
       new Notice(this.formatError(error, this.t("notice.publishFailed")));
       this.debug("publish error", error);
@@ -416,7 +416,7 @@ export default class DocferryPlugin extends Plugin {
   ): Promise<ShareResponse> {
     try {
       return await this.api.updateShare(shareId, payload);
-    } catch (error: unknown) {
+    } catch (error) {
       if (!(error instanceof ShareApiError) || error.status !== 404 || error.code !== "share_not_found") {
         throw error;
       }
@@ -446,7 +446,7 @@ export default class DocferryPlugin extends Plugin {
     try {
       const response = await this.api.getShareLinks(meta.id);
       new LinkStatusModal(this.app, file.basename, response, makeTranslator(this.settings.language)).open();
-    } catch (error: unknown) {
+    } catch (error) {
       new Notice(this.formatError(error, this.t("notice.linkStatusFailed")));
     }
   }
@@ -476,7 +476,7 @@ export default class DocferryPlugin extends Plugin {
       if (file instanceof TFile) {
         await this.app.workspace.getLeaf(true).openFile(file);
       }
-    } catch (error: unknown) {
+    } catch (error) {
       notice.hide();
       new Notice(this.formatError(error, this.t("notice.importFailed")));
     }
@@ -487,7 +487,7 @@ export default class DocferryPlugin extends Plugin {
     markdown: string,
     options: ImportShareOptions
   ): Promise<string> {
-    const notePath = normalizePath(`${options.outputFolder}/${safeVaultSegment(title)}.md`);
+    const notePath: string = normalizePath(`${options.outputFolder}/${safeVaultSegment(title)}.md`);
     await this.ensureParentFolder(notePath);
     const existing = this.app.vault.getAbstractFileByPath(notePath);
     if (existing instanceof TFile) {
@@ -566,7 +566,7 @@ export default class DocferryPlugin extends Plugin {
       report?.(this.t("progress.uploadingStyle"));
       try {
         cssAsset = await this.uploadCssSnapshot(snapshot.css);
-      } catch (error: unknown) {
+      } catch (error) {
         this.debug("css snapshot upload failed", error);
       }
     }
@@ -624,12 +624,14 @@ export default class DocferryPlugin extends Plugin {
     markdown: string,
     localAssets: UploadedLocalAssets
   ): Promise<HtmlSnapshotResult | null> {
-    const container = document.createElement("div");
+    const container = activeDocument.createElement("div");
     container.className = "markdown-preview-view markdown-rendered docferry-snapshot-source";
-    document.body.appendChild(container);
+    activeDocument.body.appendChild(container);
 
+    const component = new Component();
+    component.load();
     try {
-      await MarkdownRenderer.render(this.app, markdown, container, file.path, this);
+      await MarkdownRenderer.render(this.app, markdown, container, file.path, component);
       await sleep(150);
       this.applyLocalImageAssetPlaceholders(container, localAssets.imageAssets);
       this.applyLocalAttachmentPlaceholders(container, localAssets.linkedAssets);
@@ -639,11 +641,12 @@ export default class DocferryPlugin extends Plugin {
         html: container.innerHTML,
         css
       };
-    } catch (error: unknown) {
+    } catch (error) {
       this.debug("html snapshot failed", error);
       return null;
     } finally {
       container.remove();
+      component.unload();
     }
   }
 
@@ -738,7 +741,7 @@ export default class DocferryPlugin extends Plugin {
         return { data: buffer, filename: target.name, contentType, qualityMode: "original" };
       }
       return { data: optimized, filename: target.name, contentType, qualityMode };
-    } catch (error: unknown) {
+    } catch (error) {
       this.debug("image optimization failed; uploading original", { path: target.path, error });
       return { data: buffer, filename: target.name, contentType, qualityMode: "original" };
     }
@@ -771,11 +774,11 @@ export default class DocferryPlugin extends Plugin {
     const variables = collectThemeVariables();
     if (variables) push(variables);
 
-    for (const sheet of Array.from(document.styleSheets)) {
+    for (const sheet of Array.from(activeDocument.styleSheets)) {
       let rules: CSSRuleList;
       try {
         rules = sheet.cssRules;
-      } catch (_error) {
+      } catch {
         continue;
       }
       collectMatchingRules(rules, container, push);
@@ -903,8 +906,8 @@ export default class DocferryPlugin extends Plugin {
   }
 
   private async resolveVaultId(): Promise<string> {
-    const adapter = this.app.vault.adapter as { basePath?: unknown };
-    const basePath = typeof adapter.basePath === "string" ? adapter.basePath : "";
+    const adapter: unknown = this.app.vault.adapter;
+    const basePath = isObjectRecord(adapter) && typeof adapter.basePath === "string" ? adapter.basePath : "";
     const source = `${this.app.vault.getName()}|${basePath}`;
     return `vlt_${(await sha256(source)).slice(0, 24)}`;
   }
@@ -1029,8 +1032,8 @@ function parseObsidianTarget(rawTarget: string): { path: string; subpath: string
 }
 
 function collectThemeVariables(): string | null {
-  const rootVars = customPropertiesFor(document.documentElement);
-  const bodyVars = customPropertiesFor(document.body);
+  const rootVars = customPropertiesFor(activeDocument.documentElement);
+  const bodyVars = customPropertiesFor(activeDocument.body);
   const rootBlock = rootVars.length ? `:root {\n${rootVars.join("\n")}\n}` : "";
   const bodyBlock = bodyVars.length ? `.reader-page {\n${bodyVars.join("\n")}\n}` : "";
   return [rootBlock, bodyBlock].filter(Boolean).join("\n\n") || null;
@@ -1078,7 +1081,7 @@ function selectorMatchesContainer(selectorText: string, container: HTMLElement):
     .some((selector) => {
       try {
         return container.matches(selector) || Boolean(container.querySelector(selector));
-      } catch (_error) {
+      } catch {
         return false;
       }
     });
@@ -1176,7 +1179,7 @@ async function optimizeImageAsset(
     const scale = Math.min(1, preset.maxDimension / Math.max(bitmap.width, bitmap.height));
     const width = Math.max(1, Math.round(bitmap.width * scale));
     const height = Math.max(1, Math.round(bitmap.height * scale));
-    const canvas = document.createElement("canvas");
+    const canvas = activeDocument.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
     const context = canvas.getContext("2d");
@@ -1212,7 +1215,7 @@ async function mapWithConcurrency<T, R>(
   concurrency: number,
   mapper: (item: T, index: number) => Promise<R>
 ): Promise<R[]> {
-  const results: R[] = new Array(items.length);
+  const results: R[] = new Array<R>(items.length);
   let nextIndex = 0;
   const workerCount = Math.min(Math.max(concurrency, 1), items.length);
   await Promise.all(

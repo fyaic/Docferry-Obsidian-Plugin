@@ -36,17 +36,17 @@ export class LinkStatusModal extends Modal {
 
       if (link.target_url) {
         setting
-          .addButton((button) =>
+          .addButton((button) => {
             button.setButtonText(this.t("modal.links.copy")).onClick(async () => {
               await navigator.clipboard.writeText(link.target_url || "");
               new Notice(this.t("modal.links.targetCopied"));
-            })
-          )
-          .addButton((button) =>
+            });
+          })
+          .addButton((button) => {
             button.setButtonText(this.t("modal.links.open")).onClick(() => {
               window.open(link.target_url || "");
-            })
-          );
+            });
+          });
       }
     }
 

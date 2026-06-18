@@ -64,20 +64,20 @@ export class ImportShareModal extends Modal {
     new Setting(contentEl)
       .setName(this.t("modal.import.outputFolder"))
       .setDesc(this.t("modal.import.outputFolderDesc"))
-      .addText((text) =>
+      .addText((text) => {
         text.setValue(this.outputFolder).onChange((value) => {
           this.outputFolder = value.trim();
-        })
-      );
+        });
+      });
 
     new Setting(contentEl)
       .setName(this.t("modal.import.overwrite"))
       .setDesc(this.t("modal.import.overwriteDesc"))
-      .addToggle((toggle) =>
+      .addToggle((toggle) => {
         toggle.setValue(this.overwrite).onChange((value) => {
           this.overwrite = value;
-        })
-      );
+        });
+      });
 
     const buttons = contentEl.createDiv({ cls: "modal-button-container" });
     buttons.createEl("button", { text: this.t("modal.import.cancel") }).addEventListener("click", () => {

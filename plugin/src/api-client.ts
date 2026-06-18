@@ -91,7 +91,7 @@ export class ShareApiClient {
   async validateAuthToken(): Promise<void> {
     try {
       await this.getJson("/v0/shares/sh_token_probe");
-    } catch (error: unknown) {
+    } catch (error) {
       if (error instanceof ShareApiError && error.status === 404 && error.code === "share_not_found") {
         return;
       }
@@ -200,7 +200,13 @@ export class ShareApiClient {
       headers: cookieHeader ? { Cookie: cookieHeader } : {},
       throw: false
     });
-    if (res.status >= 200 && res.status < 300) return res.arrayBuffer;
+    if (res.status >= 200 && res.status < 300) {
+      const buffer = res.arrayBuffer;
+      if (!(buffer instanceof ArrayBuffer)) {
+        throw new ShareApiError("Asset download returned invalid buffer.", res.status);
+      }
+      return buffer;
+    }
     this.parse<never>(res.status, res.text);
     throw new ShareApiError("Asset download failed.", res.status);
   }
@@ -266,12 +272,13 @@ export class ShareApiClient {
     let parsed: unknown = undefined;
     if (text) {
       try {
-        parsed = JSON.parse(text);
+        parsed = JSON.parse(text) as unknown;
       } catch {
         parsed = undefined;
       }
     }
 
+    // The generic parse is intentional: callers rely on the API contract.
     if (status >= 200 && status < 300) return parsed as T;
 
     const error = readErrorEnvelope(parsed);

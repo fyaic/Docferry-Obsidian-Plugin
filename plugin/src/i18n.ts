@@ -127,6 +127,9 @@ const EN = {
   "modal.result.updated": "Updated",
   "modal.result.done": "Done",
 
+  "modal.confirm.confirm": "Confirm",
+  "modal.confirm.cancel": "Cancel",
+
   "modal.links.title": "Linked note status",
   "modal.links.description": "Check whether linked Obsidian notes have DocFerry URLs.",
   "modal.links.empty": "No Obsidian internal links were indexed for this share.",
@@ -321,6 +324,9 @@ const ZH_CN: Messages = {
   "modal.result.linkCopied": "链接已复制",
   "modal.result.updated": "更新时间",
   "modal.result.done": "完成",
+
+  "modal.confirm.confirm": "确认",
+  "modal.confirm.cancel": "取消",
 
   "modal.links.title": "关联笔记状态",
   "modal.links.description": "检查关联的 Obsidian 笔记是否已有 DocFerry URL。",

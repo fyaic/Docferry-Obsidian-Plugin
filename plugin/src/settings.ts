@@ -192,8 +192,7 @@ export class DocferrySettingTab extends PluginSettingTab {
         .setDesc(this.t("settings.serverUrl.desc"))
         .addText((text) => {
           text
-            // eslint-disable-next-line obsidianmd/ui/sentence-case -- URL placeholder, not user-facing sentence
-            .setPlaceholder("http://127.0.0.1:8787")
+            .setPlaceholder("Server URL: http://127.0.0.1:8787")
             .setValue(this.host.settings.serverUrl)
             .onChange(async (value) => {
               this.host.settings.serverUrl = value.trim();
@@ -234,8 +233,7 @@ export class DocferrySettingTab extends PluginSettingTab {
       tokenSetting.addText((text) => {
         text.inputEl.type = "password";
         text
-          // eslint-disable-next-line obsidianmd/ui/sentence-case -- token prefix placeholder, not a sentence
-          .setPlaceholder("dfc_...")
+          .setPlaceholder("Cloud token: dfc_...")
           .setValue(this.host.settings.apiToken)
           .onChange(async (value) => {
             this.host.settings.apiToken = value.trim();

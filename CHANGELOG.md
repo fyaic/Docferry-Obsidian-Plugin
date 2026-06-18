@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.9
+
+- Remove disallowed `eslint-disable-next-line obsidianmd/ui/sentence-case` comments.
+- Rephrase the server URL and manual cloud token placeholders to follow Obsidian sentence-case guidelines.
+- Add local ESLint setup with `eslint-plugin-obsidianmd` to catch sentence-case and other review rules before submission.
+
 ## 0.0.8
 
 - Replace `window.confirm` with an Obsidian `Modal`-based confirmation dialog.

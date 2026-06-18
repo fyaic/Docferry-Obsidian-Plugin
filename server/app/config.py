@@ -14,15 +14,21 @@ def env_bool(name: str, default: bool) -> bool:
 @dataclass(frozen=True)
 class Settings:
     service_name: str = "docferry-share"
-    version: str = "0.0.1"
+    version: str = "0.0.6"
     environment: str = "development"
     api_token: str = "dev-token"
     token_hash_secret: str = "dev-token-hash-secret"
-    default_active_share_limit: int = 10
+    install_hash_secret: str = "dev-install-hash-secret"
+    blind_index_secret: str = "dev-blind-index-secret"
+    default_active_share_limit: int = 5
+    cloud_claim_enabled: bool = True
+    cloud_claim_ip_hour_limit: int = 60
+    cloud_claim_install_hour_limit: int = 10
     master_key_b64: str = ""
     encryption_key_id: str = "v1"
     encryption_required: bool = False
     public_base_url: str = "http://127.0.0.1:8787"
+    trusted_proxy_hosts: str = ""
     database_url: str = "sqlite:///./.local/docferry.db"
     cookie_secret: str = "dev-cookie-secret"
     sso_login_url: str = "https://auth.example.com/oauth/start"
@@ -57,13 +63,23 @@ class Settings:
             environment=environment,
             api_token=os.getenv("DOCFERRY_API_TOKEN", cls.api_token),
             token_hash_secret=os.getenv("DOCFERRY_TOKEN_HASH_SECRET", cls.token_hash_secret),
+            install_hash_secret=os.getenv("DOCFERRY_INSTALL_HASH_SECRET", cls.install_hash_secret),
+            blind_index_secret=os.getenv("DOCFERRY_BLIND_INDEX_SECRET", cls.blind_index_secret),
             default_active_share_limit=int(
                 os.getenv("DOCFERRY_DEFAULT_ACTIVE_SHARE_LIMIT", cls.default_active_share_limit)
+            ),
+            cloud_claim_enabled=env_bool("DOCFERRY_CLOUD_CLAIM_ENABLED", cls.cloud_claim_enabled),
+            cloud_claim_ip_hour_limit=int(
+                os.getenv("DOCFERRY_CLOUD_CLAIM_IP_HOUR_LIMIT", cls.cloud_claim_ip_hour_limit)
+            ),
+            cloud_claim_install_hour_limit=int(
+                os.getenv("DOCFERRY_CLOUD_CLAIM_INSTALL_HOUR_LIMIT", cls.cloud_claim_install_hour_limit)
             ),
             master_key_b64=os.getenv("DOCFERRY_MASTER_KEY_B64", cls.master_key_b64),
             encryption_key_id=os.getenv("DOCFERRY_ENCRYPTION_KEY_ID", cls.encryption_key_id),
             encryption_required=env_bool("DOCFERRY_ENCRYPTION_REQUIRED", environment == "production"),
             public_base_url=os.getenv("DOCFERRY_PUBLIC_BASE_URL", cls.public_base_url).rstrip("/"),
+            trusted_proxy_hosts=os.getenv("DOCFERRY_TRUSTED_PROXY_HOSTS", cls.trusted_proxy_hosts),
             database_url=os.getenv("DOCFERRY_DATABASE_URL", cls.database_url),
             cookie_secret=os.getenv("DOCFERRY_COOKIE_SECRET", cls.cookie_secret),
             sso_login_url=os.getenv("DOCFERRY_SSO_LOGIN_URL", cls.sso_login_url),
@@ -114,3 +130,7 @@ def validate_runtime_settings(settings: Settings) -> None:
             raise RuntimeError("DOCFERRY_MASTER_KEY_B64 is required in production.")
         if not settings.token_hash_secret or settings.token_hash_secret == Settings.token_hash_secret:
             raise RuntimeError("DOCFERRY_TOKEN_HASH_SECRET must be set to a production secret.")
+        if not settings.install_hash_secret or settings.install_hash_secret == Settings.install_hash_secret:
+            raise RuntimeError("DOCFERRY_INSTALL_HASH_SECRET must be set to a production secret.")
+        if not settings.blind_index_secret or settings.blind_index_secret == Settings.blind_index_secret:
+            raise RuntimeError("DOCFERRY_BLIND_INDEX_SECRET must be set to a production secret.")

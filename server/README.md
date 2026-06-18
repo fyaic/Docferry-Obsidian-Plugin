@@ -1,6 +1,6 @@
 # server
 
-FastAPI service for DocFerry share links. It supports both the hosted DocFerry Cloud free-quota path and custom self-hosted deployments: publish one Markdown note, return a share URL, render a read-only viewer, protect shares with passwords and expirations, update or stop shares, expose account quota, validate Cloud tokens, and store note body/object bytes with server-side encrypted-at-rest storage.
+FastAPI service for DocFerry share links. It supports both the hosted DocFerry Cloud free-quota path and custom self-hosted deployments: publish one Markdown note, return a share URL, render a read-only viewer, protect shares with passwords and expirations, update or stop shares, expose account quota, validate Cloud tokens, and store note body/object bytes plus sensitive metadata with server-side encrypted-at-rest storage.
 
 ## Responsibilities
 
@@ -11,8 +11,8 @@ FastAPI service for DocFerry share links. It supports both the hosted DocFerry C
 - Serve read-only viewer pages.
 - Update an existing share URL.
 - Stop an existing share.
-- Isolate owners by Cloud token and enforce the 10 active shares free quota.
-- Encrypt note body fields and object bytes at rest.
+- Issue anonymous Cloud tokens, isolate owners by token hash, and enforce the 5 active shares free quota.
+- Encrypt note body fields, object bytes, and sensitive metadata at rest; use blind indexes for matching fields.
 - Return import payloads for one DocFerry share URL.
 
 ## Why Not Reuse A Third-Party Backend
@@ -57,7 +57,8 @@ Implemented:
 - `GET /v0/health`
 - `GET /v0/account`
 - `GET /v0/auth/config`
-- `POST /v0/auth/exchange`, which currently returns `manual_token_only`
+- `POST /v0/auth/exchange`, which currently returns `cloud_claim_required`
+- `POST /v0/cloud/claim`
 - `POST /v0/assets/intents`
 - `POST /v0/assets/{asset_id}/complete`
 - `POST /v0/assets`
@@ -100,10 +101,21 @@ Production Cloud deployments must configure:
 - `DOCFERRY_ENV=production`
 - `DOCFERRY_MASTER_KEY_B64`
 - `DOCFERRY_TOKEN_HASH_SECRET`
+- `DOCFERRY_INSTALL_HASH_SECRET`
+- `DOCFERRY_BLIND_INDEX_SECRET`
 - `DOCFERRY_COOKIE_SECRET`
 - `DOCFERRY_DATABASE_URL`
 
-`DOCFERRY_MASTER_KEY_B64` must decode to a 32-byte master key. Production startup fails when the master key is missing.
+`DOCFERRY_MASTER_KEY_B64` must decode to a 32-byte master key. Production startup fails when the master key or production hashing/index secrets are missing.
+
+After upgrading a database that already contains shares created before metadata encryption, run a dry-run and then apply the metadata backfill:
+
+```bash
+python scripts/backfill_metadata_encryption.py
+python scripts/backfill_metadata_encryption.py --apply
+```
+
+The backfill writes encrypted metadata fields and blind indexes, then clears legacy plaintext metadata columns where the original value can still be recovered. It requires `DOCFERRY_MASTER_KEY_B64` when `--apply` is used.
 
 ## Verification
 
@@ -119,7 +131,7 @@ Run a live smoke test after starting the service:
 uv run python scripts/smoke_test.py --base-url http://127.0.0.1:8787 --token dev-token
 ```
 
-By default, the smoke test creates 10 active shares, verifies that the 11th create returns `share_quota_exceeded`, and cleans up smoke shares. If the token is not dedicated to smoke testing, use `--skip-quota`:
+By default, the smoke test creates 5 active shares, verifies that the 6th create returns `share_quota_exceeded`, and cleans up smoke shares. If the token is not dedicated to smoke testing, use `--skip-quota`:
 
 ```bash
 uv run python scripts/smoke_test.py --base-url http://127.0.0.1:8787 --token dev-token --skip-quota
@@ -179,7 +191,7 @@ First deployment:
 
 ```bash
 cp .env.production.example .env.production
-# Edit .env.production with HTTPS public base URL, database password, master key, token hash secret, and cookie secret.
+# Edit .env.production with HTTPS public base URL, database password, master key, token hash secret, blind index secret, and cookie secret.
 docker compose --env-file .env.production -f docker-compose.prod.yml config
 docker compose --env-file .env.production -f docker-compose.prod.yml up -d db
 python3 -m venv .venv
@@ -198,18 +210,22 @@ python - <<'PY'
 import base64, secrets
 print("DOCFERRY_MASTER_KEY_B64=" + base64.b64encode(secrets.token_bytes(32)).decode())
 print("DOCFERRY_TOKEN_HASH_SECRET=" + secrets.token_urlsafe(48))
+print("DOCFERRY_INSTALL_HASH_SECRET=" + secrets.token_urlsafe(48))
+print("DOCFERRY_BLIND_INDEX_SECRET=" + secrets.token_urlsafe(48))
 print("DOCFERRY_COOKIE_SECRET=" + secrets.token_urlsafe(48))
 print("DOCFERRY_API_TOKEN=" + secrets.token_urlsafe(48))
 PY
 ```
 
-Issue a Cloud token through the helper:
+Anonymous Cloud tokens are normally issued through `POST /v0/cloud/claim` from the plugin. The manual helper remains available only for support, migration, or local diagnostics:
 
 ```bash
-uv run python scripts/issue_cloud_token.py --user-id usr_tommy --label tommy-free --limit 10
+uv run python scripts/issue_cloud_token.py --user-id usr_tommy --label tommy-free --limit 5
 ```
 
 FastAPI runs under host systemd. PostgreSQL runs through Docker Compose. The public endpoint must be an HTTPS domain, with nginx proxying to `127.0.0.1:8787`. A Tencent Cloud IP can be used for staging or preflight, but it must not be embedded as the public Cloud endpoint in the plugin.
+
+When running behind nginx or another reverse proxy, set `DOCFERRY_TRUSTED_PROXY_HOSTS` to the proxy address seen by FastAPI, for example `127.0.0.1,::1`. The app ignores `X-Forwarded-For` unless the direct client is trusted; nginx should overwrite `X-Forwarded-For` with `$remote_addr`.
 
 Before release:
 

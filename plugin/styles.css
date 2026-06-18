@@ -50,6 +50,33 @@
   width: 100%;
 }
 
+.docferry-language-toggle {
+  align-items: center;
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 32px;
+  justify-content: center;
+  margin-left: auto;
+  padding: 0;
+  width: 32px;
+}
+
+.docferry-language-toggle:hover,
+.docferry-language-toggle:focus-visible {
+  color: var(--text-normal);
+}
+
+.docferry-language-toggle svg {
+  height: 18px;
+  width: 18px;
+}
+
 .docferry-title-input,
 .docferry-url-input {
   min-width: min(30rem, 100%);
@@ -81,6 +108,144 @@
   width: 100%;
 }
 
+.docferry-settings-tab .docferry-token-setting .setting-item-control {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.docferry-settings-tab .docferry-token-setting .setting-item-control input[type="password"] {
+  max-width: 100%;
+}
+
+.docferry-settings-tab .docferry-token-setting .setting-item-control button {
+  align-self: flex-start;
+}
+
+.docferry-settings-tab .docferry-advanced-token {
+  border-top: 1px solid var(--background-modifier-border);
+  margin: 10px 0 16px;
+  padding-top: 10px;
+}
+
+.docferry-settings-tab .docferry-advanced-token summary {
+  color: var(--text-muted);
+  cursor: pointer;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.docferry-share-management {
+  border-top: 1px solid var(--background-modifier-border);
+  margin-top: 24px;
+  padding-top: 18px;
+}
+
+.docferry-share-management-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.docferry-share-management-copy {
+  min-width: 0;
+}
+
+.docferry-share-management-copy h3 {
+  font-size: 1.05rem;
+  letter-spacing: 0;
+  line-height: 1.3;
+  margin: 0;
+}
+
+.docferry-share-management-copy p {
+  margin: 4px 0 0;
+}
+
+.docferry-share-management-actions,
+.docferry-share-row-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.docferry-share-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.docferry-share-empty {
+  color: var(--text-muted);
+  padding: 8px 0;
+}
+
+.docferry-share-row {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 12px;
+}
+
+.docferry-share-row-main {
+  min-width: 0;
+}
+
+.docferry-share-title-line {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.docferry-share-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.docferry-share-path {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
+.docferry-share-details {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--font-ui-smaller);
+  gap: 6px 12px;
+  margin-top: 8px;
+}
+
+.docferry-share-status {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.2;
+  padding: 2px 6px;
+}
+
+.docferry-share-status-published,
+.docferry-share-status-password_protected {
+  color: var(--text-accent);
+}
+
+.docferry-share-status-expired,
+.docferry-share-status-stopped,
+.docferry-share-status-not_in_account,
+.docferry-share-error {
+  color: var(--text-error);
+}
+
 @media (max-width: 760px) {
   .docferry-settings-tab .setting-item {
     flex-direction: column;
@@ -88,5 +253,22 @@
 
   .docferry-settings-tab .setting-item-control {
     width: 100%;
+  }
+
+  .docferry-plugin-header {
+    align-items: flex-start;
+  }
+
+  .docferry-share-management-header,
+  .docferry-share-row {
+    grid-template-columns: 1fr;
+  }
+
+  .docferry-share-management-header {
+    flex-direction: column;
+  }
+
+  .docferry-share-row-actions {
+    justify-content: flex-start;
   }
 }

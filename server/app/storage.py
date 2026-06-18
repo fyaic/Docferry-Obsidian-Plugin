@@ -11,6 +11,9 @@ class FileObjectStorage:
         digest = normalize_sha256(content_hash)
         return f"assets/{owner_id}/{digest[:2]}/{digest}"
 
+    def asset_storage_key(self, owner_id: str, asset_id: str) -> str:
+        return f"assets/{owner_id}/objects/{asset_id}"
+
     def put(self, storage_key: str, data: bytes) -> None:
         path = self.path_for_key(storage_key)
         path.parent.mkdir(parents=True, exist_ok=True)

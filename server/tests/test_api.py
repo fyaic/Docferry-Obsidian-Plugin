@@ -14,7 +14,18 @@ from sqlalchemy import select
 from app.config import Settings
 from app.main import create_app
 from app.markdown import render_markdown
-from app.models import Asset, Share, ShareAccessEvent, ShareAsset, User, UserToken, utc_now
+from app.models import (
+    Asset,
+    CloudClaimEvent,
+    CloudInstall,
+    Share,
+    ShareAccessEvent,
+    ShareAsset,
+    ShareLink,
+    User,
+    UserToken,
+    utc_now,
+)
 from app.security import hash_cloud_token
 
 TEST_MASTER_KEY_B64 = "eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg="
@@ -42,7 +53,7 @@ def cloud_auth_headers(
     token: str,
     user_id: str,
     label: str | None = "Free token",
-    active_share_limit: int = 10,
+    active_share_limit: int = 5,
     revoked: bool = False,
 ) -> dict[str, str]:
     now = utc_now()
@@ -119,6 +130,19 @@ def payload(**overrides):
     return data
 
 
+def cloud_claim_payload(**overrides):
+    data = {
+        "install_id": "dfi_testinstallid0123456789abcdefghijkl",
+        "claim_version": 1,
+        "plugin_id": "docferry",
+        "plugin_version": "0.0.6",
+        "obsidian_version": "1.5.0",
+        "client": {"platform": "desktop"},
+    }
+    data.update(overrides)
+    return data
+
+
 def test_health() -> None:
     client = make_client()
     response = client.get("/v0/health")
@@ -146,6 +170,118 @@ def test_account_status_for_self_host_token() -> None:
     assert account["active_shares"] == 1
     assert account["active_share_limit"] == 0
     assert account["remaining_active_shares"] is None
+
+
+def test_list_shares_returns_account_shares_including_stopped() -> None:
+    client = make_client()
+    first = client.post(
+        "/v0/shares",
+        json=payload(title="First note", source_path="Notes/first.md", source_hash="sha256:first"),
+        headers=auth_headers(),
+    )
+    second = client.post(
+        "/v0/shares",
+        json=payload(title="Second note", source_path="Notes/second.md", source_hash="sha256:second"),
+        headers=auth_headers(),
+    )
+    other_headers = cloud_auth_headers(client, token="dfc_other_owner", user_id="usr_other")
+    other = client.post(
+        "/v0/shares",
+        json=payload(title="Other owner", source_path="Notes/other.md", source_hash="sha256:other"),
+        headers=other_headers,
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert other.status_code == 200
+
+    stopped = client.delete(f"/v0/shares/{first.json()['share_id']}", headers=auth_headers())
+    assert stopped.status_code == 200
+
+    response = client.get("/v0/shares", headers=auth_headers())
+
+    assert response.status_code == 200
+    shares = response.json()["shares"]
+    share_ids = {share["share_id"] for share in shares}
+    assert share_ids == {first.json()["share_id"], second.json()["share_id"]}
+    assert other.json()["share_id"] not in share_ids
+    assert any(share["status"] == "stopped" for share in shares)
+    active = client.get("/v0/shares?include_stopped=false", headers=auth_headers())
+    assert active.status_code == 200
+    assert [share["share_id"] for share in active.json()["shares"]] == [second.json()["share_id"]]
+
+
+def test_cloud_claim_issues_token_without_plaintext_storage() -> None:
+    client = make_client()
+
+    response = client.post("/v0/cloud/claim", json=cloud_claim_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    token = body["token"]
+    assert token.startswith("dfc_")
+    assert body["token_type"] == "bearer"
+    assert body["account"]["mode"] == "cloud"
+    assert body["account"]["active_share_limit"] == 5
+    assert body["account"]["remaining_active_shares"] == 5
+
+    account = client.get("/v0/account", headers={"Authorization": f"Bearer {token}"})
+    assert account.status_code == 200
+    assert account.json()["account"]["active_share_limit"] == 5
+
+    with client.app.state.session_factory() as session:
+        installs = session.execute(select(CloudInstall)).scalars().all()
+        events = session.execute(select(CloudClaimEvent)).scalars().all()
+        token_rows = session.execute(select(UserToken)).scalars().all()
+        assert len(installs) == 1
+        assert len(events) == 1
+        assert events[0].result == "issued"
+        assert installs[0].install_id_hash != "dfi_testinstallid0123456789abcdefghijkl"
+        assert token_rows[0].token_hash != token
+        assert token_rows[0].install_id == installs[0].id
+
+
+def test_cloud_claim_replacement_revokes_old_token_and_keeps_account() -> None:
+    client = make_client()
+    first = client.post("/v0/cloud/claim", json=cloud_claim_payload())
+    assert first.status_code == 200
+    old_token = first.json()["token"]
+    old_headers = {"Authorization": f"Bearer {old_token}"}
+    created = client.post("/v0/shares", json=payload(title="Claimed note"), headers=old_headers)
+    assert created.status_code == 200
+
+    second = client.post("/v0/cloud/claim", json=cloud_claim_payload())
+
+    assert second.status_code == 200
+    new_token = second.json()["token"]
+    assert new_token != old_token
+    assert second.json()["account"]["active_shares"] == 1
+    assert client.get("/v0/account", headers=old_headers).status_code == 401
+    new_account = client.get("/v0/account", headers={"Authorization": f"Bearer {new_token}"})
+    assert new_account.status_code == 200
+    assert new_account.json()["account"]["active_shares"] == 1
+
+    with client.app.state.session_factory() as session:
+        install = session.execute(select(CloudInstall)).scalar_one()
+        events = session.execute(select(CloudClaimEvent).order_by(CloudClaimEvent.created_at)).scalars().all()
+        token_rows = session.execute(select(UserToken).order_by(UserToken.created_at)).scalars().all()
+        assert install.replacement_count == 1
+        assert [event.result for event in events] == ["issued", "replaced"]
+        assert token_rows[0].revoked_at is not None
+        assert token_rows[1].revoked_at is None
+
+
+def test_cloud_claim_rate_limit_and_invalid_install_id() -> None:
+    client = make_client(cloud_claim_install_hour_limit=1)
+
+    first = client.post("/v0/cloud/claim", json=cloud_claim_payload())
+    limited = client.post("/v0/cloud/claim", json=cloud_claim_payload())
+    invalid = client.post("/v0/cloud/claim", json=cloud_claim_payload(install_id="vault-name"))
+
+    assert first.status_code == 200
+    assert limited.status_code == 429
+    assert limited.json()["error"]["code"] == "cloud_claim_rate_limited"
+    assert invalid.status_code == 400
+    assert invalid.json()["error"]["code"] == "invalid_install_id"
 
 
 def test_cloud_token_is_hashed_and_scoped_to_owner() -> None:
@@ -198,7 +334,7 @@ def test_cloud_active_share_quota_lifecycle() -> None:
     client = make_client()
     headers = cloud_auth_headers(client, token="dfc_quota_lifecycle_token", user_id="usr_cloud_quota")
     created_shares = []
-    for index in range(10):
+    for index in range(5):
         response = client.post(
             "/v0/shares",
             json=payload(
@@ -218,11 +354,11 @@ def test_cloud_active_share_quota_lifecycle() -> None:
     )
     assert blocked.status_code == 403
     assert blocked.json()["error"]["code"] == "share_quota_exceeded"
-    assert blocked.json()["error"]["message"] == "You have reached the 10 active shares included with DocFerry Cloud."
+    assert blocked.json()["error"]["message"] == "You have reached the 5 active shares included with DocFerry Cloud."
 
     updated = client.put(
         f"/v0/shares/{created_shares[-1]['share_id']}",
-        json=payload(source_path="Notes/quota-9.md", source_hash="sha256:quota-9-updated", title="Updated tenth"),
+        json=payload(source_path="Notes/quota-4.md", source_hash="sha256:quota-4-updated", title="Updated fifth"),
         headers=headers,
     )
     assert updated.status_code == 200
@@ -239,7 +375,7 @@ def test_cloud_active_share_quota_lifecycle() -> None:
 
     account = client.get("/v0/account", headers=headers)
     assert account.status_code == 200
-    assert account.json()["account"]["active_shares"] == 10
+    assert account.json()["account"]["active_shares"] == 5
     assert account.json()["account"]["remaining_active_shares"] == 0
 
 
@@ -328,24 +464,6 @@ def test_update_share_keeps_slug() -> None:
     assert client.get(f"/s/{created['slug']}").text.count("Updated") >= 1
 
 
-def test_legacy_obsidian_plugin_title_falls_back_to_source_filename() -> None:
-    client = make_client()
-    created = client.post(
-        "/v0/shares",
-        json=payload(
-            source_path="Folder/陈天桥 - AI赋能 - AI原生 - AI启迪.md",
-            title="**AI 时代的拟物化陷阱**",
-            client={"plugin_id": "fuyou-share", "plugin_version": "0.0.1", "obsidian_version": "unknown"},
-        ),
-        headers=auth_headers(),
-    )
-
-    assert created.status_code == 200
-    body = created.json()
-    status = client.get(f"/v0/shares/{body['share_id']}", headers=auth_headers())
-    assert status.json()["title"] == "陈天桥 - AI赋能 - AI原生 - AI启迪"
-
-
 def test_current_obsidian_plugin_preserves_custom_title() -> None:
     client = make_client()
     created = client.post(
@@ -385,20 +503,75 @@ def test_get_share_status_for_known_share_only() -> None:
     assert missing.json()["error"]["code"] == "share_not_found"
 
 
-def test_auth_exchange_is_explicitly_manual_token_only() -> None:
+def test_auth_exchange_points_to_cloud_claim() -> None:
     client = make_client()
+    config = client.get("/v0/auth/config")
+    assert config.status_code == 200
+    assert config.json()["provider"] == "anonymous_cloud_claim"
+    assert config.json()["login_url"] == "/v0/cloud/claim"
+
     response = client.post(
         "/v0/auth/exchange",
         json={"code": "code-from-legacy-auth-flow", "redirect_uri": "obsidian://docferry/auth"},
     )
     assert response.status_code == 501
-    assert response.json()["error"]["code"] == "manual_token_only"
-    assert response.json()["error"]["message"] == "DocFerry uses manually issued Cloud tokens in this release."
+    assert response.json()["error"]["code"] == "cloud_claim_required"
+    assert response.json()["error"]["message"] == "DocFerry Cloud uses in-plugin anonymous claim in this release."
+
+
+def test_cloud_claim_ip_limit_ignores_untrusted_x_forwarded_for() -> None:
+    client = make_client(cloud_claim_ip_hour_limit=1)
+
+    first = client.post(
+        "/v0/cloud/claim",
+        json=cloud_claim_payload(install_id="dfi_untrustedxff00123456789abcdefghijkl"),
+        headers={"X-Forwarded-For": "203.0.113.10"},
+    )
+    limited = client.post(
+        "/v0/cloud/claim",
+        json=cloud_claim_payload(install_id="dfi_untrustedxff10123456789abcdefghijkl"),
+        headers={"X-Forwarded-For": "198.51.100.20"},
+    )
+
+    assert first.status_code == 200
+    assert limited.status_code == 429
+    assert limited.json()["error"]["code"] == "cloud_claim_rate_limited"
+
+
+def test_cloud_claim_ip_limit_uses_forwarded_ip_from_trusted_proxy() -> None:
+    client = make_client(cloud_claim_ip_hour_limit=1, trusted_proxy_hosts="testclient")
+
+    first = client.post(
+        "/v0/cloud/claim",
+        json=cloud_claim_payload(install_id="dfi_trustedxff00123456789abcdefghijkl"),
+        headers={"X-Forwarded-For": "203.0.113.10"},
+    )
+    second = client.post(
+        "/v0/cloud/claim",
+        json=cloud_claim_payload(install_id="dfi_trustedxff10123456789abcdefghijkl"),
+        headers={"X-Forwarded-For": "198.51.100.20"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
 
 
 def test_production_requires_master_key() -> None:
     with pytest.raises(RuntimeError, match="DOCFERRY_MASTER_KEY_B64"):
         create_app(Settings(environment="production", token_hash_secret="production-token-secret"))
+
+
+def test_production_requires_blind_index_secret() -> None:
+    with pytest.raises(RuntimeError, match="DOCFERRY_BLIND_INDEX_SECRET"):
+        create_app(
+            Settings(
+                environment="production",
+                master_key_b64=TEST_MASTER_KEY_B64,
+                token_hash_secret="production-token-secret",
+                install_hash_secret="production-install-secret",
+                blind_index_secret=Settings.blind_index_secret,
+            )
+        )
 
 
 def test_cos_object_key_prefix_and_resource_scope() -> None:
@@ -490,6 +663,140 @@ def test_encrypted_share_fields_are_not_plaintext_and_are_rendered() -> None:
     imported = client.get(f"/s/{body['slug']}/import")
     assert imported.status_code == 200
     assert imported.json()["markdown"] == markdown
+
+
+def test_sensitive_metadata_uses_encrypted_fields_and_blind_indexes(tmp_path) -> None:
+    client = make_client(object_storage_root=str(tmp_path), master_key_b64=TEST_MASTER_KEY_B64)
+    image = b"\x89PNG\r\n\x1a\nmetadata-secret-image"
+    uploaded = client.post(
+        "/v0/assets",
+        content=image,
+        headers=asset_headers(image, filename="chart-secret-6f7a.png"),
+    )
+    assert uploaded.status_code == 200
+    asset = uploaded.json()
+    asset_hash = asset["hash"]
+
+    created = client.post(
+        "/v0/shares",
+        json=payload(
+            title="Top Secret Title 6f7a",
+            vault_id="Vault Secret 6f7a",
+            source_path="Notes/Secret Path 6f7a.md",
+            source_path_normalized="Notes/Secret Path 6f7a.md",
+            doc_identity="doc-secret-6f7a",
+            source_hash="sha256:secret-source-6f7a",
+            client={
+                "plugin_id": "docferry",
+                "plugin_version": "plugin-version-secret-6f7a",
+                "obsidian_version": "obsidian-secret-6f7a",
+            },
+            assets=[
+                {
+                    "asset_id": asset["asset_id"],
+                    "role": "image",
+                    "original_path": "images/chart-secret-6f7a.png",
+                }
+            ],
+            outbound_links=[
+                {
+                    "raw_target": "Target Secret 6f7a#Intro",
+                    "target_path": "Knowledge/Target Secret 6f7a.md",
+                    "target_doc_identity": "target-doc-secret-6f7a",
+                    "target_subpath": "Intro",
+                    "label": "Readable Label 6f7a",
+                    "link_kind": "wiki",
+                }
+            ],
+        ),
+        headers=auth_headers(),
+    )
+    assert created.status_code == 200
+    body = created.json()
+
+    with client.app.state.session_factory() as session:
+        share = session.get(Share, body["share_id"])
+        link = session.execute(select(ShareLink).where(ShareLink.source_share_id == share.id)).scalar_one()
+        asset_row = session.get(Asset, asset["asset_id"])
+        share_asset = session.execute(select(ShareAsset).where(ShareAsset.share_id == share.id)).scalar_one()
+
+        assert share.title == "Encrypted share"
+        assert share.source_path == ""
+        assert share.vault_id is None
+        assert share.doc_identity is None
+        assert share.source_hash.startswith("encrypted:")
+        assert share.title_enc and '"df_enc":1' in share.title_enc
+        assert share.vault_id_index and share.source_path_full_index and share.doc_identity_index
+        assert link.raw_target == "[encrypted]"
+        assert link.raw_target_enc and '"df_enc":1' in link.raw_target_enc
+        assert link.raw_target_index and link.target_path_full_index and link.target_doc_identity_index
+        assert asset_row.hash.startswith("encrypted:")
+        assert asset_row.hash_enc and '"df_enc":1' in asset_row.hash_enc
+        assert asset_row.hash_index
+        assert asset_row.filename == "asset"
+        assert "chart-secret-6f7a" not in asset_row.storage_key
+        assert asset_hash.removeprefix("sha256:") not in asset_row.storage_key
+        assert share_asset.original_path is None
+        assert share_asset.original_path_enc and '"df_enc":1' in share_asset.original_path_enc
+
+        row_dump = json.dumps(
+            {
+                "share": share.__dict__,
+                "link": link.__dict__,
+                "asset": asset_row.__dict__,
+                "share_asset": share_asset.__dict__,
+            },
+            default=str,
+            sort_keys=True,
+        )
+        for secret in (
+            "Top Secret Title 6f7a",
+            "Vault Secret 6f7a",
+            "Notes/Secret Path 6f7a.md",
+            "doc-secret-6f7a",
+            "sha256:secret-source-6f7a",
+            "plugin-version-secret-6f7a",
+            "obsidian-secret-6f7a",
+            "Target Secret 6f7a#Intro",
+            "Knowledge/Target Secret 6f7a.md",
+            "target-doc-secret-6f7a",
+            "Readable Label 6f7a",
+            "chart-secret-6f7a.png",
+            "images/chart-secret-6f7a.png",
+        ):
+            assert secret not in row_dump
+
+    status = client.get(f"/v0/shares/{body['share_id']}", headers=auth_headers())
+    assert status.status_code == 200
+    assert status.json()["title"] == "Top Secret Title 6f7a"
+    assert status.json()["source_path"] == "Notes/Secret Path 6f7a.md"
+    assert status.json()["source_hash"] == "sha256:secret-source-6f7a"
+
+    links = client.get(f"/v0/shares/{body['share_id']}/links", headers=auth_headers())
+    assert links.status_code == 200
+    assert links.json()["links"][0]["raw_target"] == "Target Secret 6f7a#Intro"
+    assert links.json()["links"][0]["target_path"] == "Knowledge/Target Secret 6f7a.md"
+    assert links.json()["links"][0]["label"] == "Readable Label 6f7a"
+
+    imported = client.get(f"/s/{body['slug']}/import")
+    assert imported.status_code == 200
+    assert imported.json()["title"] == "Top Secret Title 6f7a"
+    assert imported.json()["source_hash"] == "sha256:secret-source-6f7a"
+    assert imported.json()["assets"][0]["filename"] == "chart-secret-6f7a.png"
+    assert imported.json()["assets"][0]["original_path"] == "images/chart-secret-6f7a.png"
+
+    deleted = client.delete(f"/v0/shares/{body['share_id']}", headers=auth_headers())
+    assert deleted.status_code == 200
+    with client.app.state.session_factory() as session:
+        stopped = session.get(Share, body["share_id"])
+        assert stopped.title_enc is None
+        assert stopped.source_path_enc is None
+        assert stopped.source_path_full_index is None
+        assert stopped.doc_identity_index is None
+        assert stopped.source_hash_enc is None
+        assert stopped.client_enc is None
+        assert session.execute(select(ShareLink).where(ShareLink.source_share_id == stopped.id)).first() is None
+        assert session.execute(select(ShareAsset).where(ShareAsset.share_id == stopped.id)).first() is None
 
 
 def test_encrypted_asset_object_hides_plaintext_and_serves_decrypted(tmp_path) -> None:

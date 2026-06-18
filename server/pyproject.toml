@@ -1,6 +1,6 @@
 [project]
 name = "docferry-share-server"
-version = "0.0.1"
+version = "0.0.6"
 description = "Self-hosted FastAPI service for single-note Obsidian share links."
 requires-python = ">=3.12"
 dependencies = [

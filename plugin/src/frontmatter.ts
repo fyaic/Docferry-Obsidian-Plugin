@@ -15,33 +15,22 @@ const DOCFERRY_LEGACY_FIELDS = {
   expires: "docferry_share_expires"
 } as const;
 
-const FUYOU_LEGACY_FIELDS = {
-  id: "fuyou_share_id",
-  url: "fuyou_share_url",
-  updated: "fuyou_share_updated",
-  passwordEnabled: "fuyou_share_password_enabled",
-  expires: "fuyou_share_expires"
-} as const;
-
 export function readShareMeta(app: App, file: TFile): ShareMeta {
   const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter;
   if (!frontmatter) return {};
 
   return {
-    id: readString(frontmatter[FIELD_ID]) ?? readString(frontmatter[DOCFERRY_LEGACY_FIELDS.id]) ?? readString(frontmatter[FUYOU_LEGACY_FIELDS.id]),
-    url: readString(frontmatter[FIELD_URL]) ?? readString(frontmatter[DOCFERRY_LEGACY_FIELDS.url]) ?? readString(frontmatter[FUYOU_LEGACY_FIELDS.url]),
+    id: readString(frontmatter[FIELD_ID]) ?? readString(frontmatter[DOCFERRY_LEGACY_FIELDS.id]),
+    url: readString(frontmatter[FIELD_URL]) ?? readString(frontmatter[DOCFERRY_LEGACY_FIELDS.url]),
     updated:
       readString(frontmatter[FIELD_UPDATED]) ??
-      readString(frontmatter[DOCFERRY_LEGACY_FIELDS.updated]) ??
-      readString(frontmatter[FUYOU_LEGACY_FIELDS.updated]),
+      readString(frontmatter[DOCFERRY_LEGACY_FIELDS.updated]),
     passwordEnabled:
       readBoolean(frontmatter[FIELD_PASSWORD_ENABLED]) ??
-      readBoolean(frontmatter[DOCFERRY_LEGACY_FIELDS.passwordEnabled]) ??
-      readBoolean(frontmatter[FUYOU_LEGACY_FIELDS.passwordEnabled]),
+      readBoolean(frontmatter[DOCFERRY_LEGACY_FIELDS.passwordEnabled]),
     expires:
       readString(frontmatter[FIELD_EXPIRES]) ??
       readString(frontmatter[DOCFERRY_LEGACY_FIELDS.expires]) ??
-      readString(frontmatter[FUYOU_LEGACY_FIELDS.expires]) ??
       null
   };
 }
@@ -79,11 +68,6 @@ function deleteLegacyFields(frontmatter: Record<string, unknown>): void {
   delete frontmatter[DOCFERRY_LEGACY_FIELDS.updated];
   delete frontmatter[DOCFERRY_LEGACY_FIELDS.passwordEnabled];
   delete frontmatter[DOCFERRY_LEGACY_FIELDS.expires];
-  delete frontmatter[FUYOU_LEGACY_FIELDS.id];
-  delete frontmatter[FUYOU_LEGACY_FIELDS.url];
-  delete frontmatter[FUYOU_LEGACY_FIELDS.updated];
-  delete frontmatter[FUYOU_LEGACY_FIELDS.passwordEnabled];
-  delete frontmatter[FUYOU_LEGACY_FIELDS.expires];
 }
 
 function readString(value: unknown): string | undefined {

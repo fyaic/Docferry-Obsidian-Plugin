@@ -31,6 +31,16 @@ def hash_cloud_token(token: str, settings: Settings) -> str:
     return hmac.new(settings.token_hash_secret.encode("utf-8"), token.encode("utf-8"), sha256).hexdigest()
 
 
+def hash_cloud_install_id(install_id: str, settings: Settings) -> str:
+    secret = settings.install_hash_secret or settings.token_hash_secret
+    return hmac.new(secret.encode("utf-8"), install_id.encode("utf-8"), sha256).hexdigest()
+
+
+def hash_cloud_claim_ip(ip: str, settings: Settings) -> str:
+    secret = settings.install_hash_secret or settings.token_hash_secret
+    return hmac.new(secret.encode("utf-8"), ip.encode("utf-8"), sha256).hexdigest()
+
+
 def make_cloud_token() -> str:
     return f"dfc_{secrets.token_urlsafe(32)}"
 

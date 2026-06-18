@@ -34,7 +34,7 @@ class Client:
         headers: dict[str, str] | None = None,
         auth: bool = False,
     ) -> tuple[int, bytes, str]:
-        request_headers = {"User-Agent": "DocferryComplexRegression/0.0.1"}
+        request_headers = {"User-Agent": "DocferryComplexRegression/0.0.6"}
         if headers:
             request_headers.update(headers)
         if auth:
@@ -137,7 +137,7 @@ def run(base_url: str, token: str, fixture: Path, *, keep_share: bool) -> dict[s
         "css_asset_id": None,
         "assets": [{"asset_id": asset_id, "role": "image", "original_path": "images/regression-chart.png"}],
         "expires_at": None,
-        "client": {"plugin_id": "complex-regression", "plugin_version": "0.0.1", "obsidian_version": "script"},
+        "client": {"plugin_id": "complex-regression", "plugin_version": "0.0.6", "obsidian_version": "script"},
     }
     status, share = client.json_request("POST", "/v0/shares", payload=payload, auth=True)
     require(status == 200, f"share create failed: {status} {share}")

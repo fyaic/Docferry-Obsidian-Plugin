@@ -9,9 +9,16 @@ from .markdown import render_markdown
 from .models import Share
 
 
-def document_page(share: Share, markdown: str, html_snapshot: str | None) -> str:
+def document_page(
+    share: Share,
+    markdown: str,
+    html_snapshot: str | None,
+    title: str | None = None,
+    asset_refs: list[dict[str, str]] | None = None,
+) -> str:
+    title = title if title is not None else share.title
     content = html_snapshot if html_snapshot else render_markdown(markdown)
-    content = polish_content_html(rewrite_internal_link_urls(rewrite_asset_urls(content, share), share))
+    content = polish_content_html(rewrite_internal_link_urls(rewrite_asset_urls(content, share, asset_refs), share))
     updated = format_timestamp(share.updated_at)
     render_label = "Obsidian snapshot" if html_snapshot else "Markdown fallback"
     css_asset_link = share_css_asset_link(share)
@@ -21,7 +28,7 @@ def document_page(share: Share, markdown: str, html_snapshot: str | None) -> str
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
-  <title>{escape(share.title)}</title>
+  <title>{escape(title)}</title>
   <style>{base_css()}</style>
   {css_asset_link}
   <style>{reader_guard_css()}</style>
@@ -42,7 +49,7 @@ def document_page(share: Share, markdown: str, html_snapshot: str | None) -> str
   <main class="reader-shell">
     <section class="doc-header">
       <p class="doc-kicker">Shared note</p>
-      <h1>{escape(share.title)}</h1>
+      <h1>{escape(title)}</h1>
       <p class="doc-meta">Updated <time>{escape(updated)}</time></p>
     </section>
     <article class="markdown-body markdown-preview-view markdown-rendered">{content}</article>
@@ -146,8 +153,8 @@ def reader_guard_css() -> str:
 """
 
 
-def rewrite_asset_urls(content: str, share: Share) -> str:
-    for asset_ref in share.assets:
+def rewrite_asset_urls(content: str, share: Share, asset_refs: list[dict[str, str]] | None = None) -> str:
+    for asset_ref in asset_refs if asset_refs is not None else share.assets:
         asset_id = asset_ref.get("asset_id")
         if not asset_id:
             continue

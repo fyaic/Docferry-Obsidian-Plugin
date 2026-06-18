@@ -54,7 +54,7 @@ class Client:
         headers: dict[str, str] | None = None,
         auth: bool = False,
     ) -> tuple[int, bytes, str]:
-        request_headers = {"User-Agent": "DocferryRealVaultRegression/0.0.1"}
+        request_headers = {"User-Agent": "DocferryRealVaultRegression/0.0.6"}
         if headers:
             request_headers.update(headers)
         if auth:
@@ -238,7 +238,7 @@ def run_doc(
         "expires_at": None,
         "client": {
             "plugin_id": "real-vault-regression",
-            "plugin_version": "0.0.1",
+            "plugin_version": "0.0.6",
             "obsidian_version": "script",
         },
     }

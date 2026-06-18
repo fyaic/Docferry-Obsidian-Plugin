@@ -75,6 +75,10 @@ class ShareStatusResponse(BaseModel):
     last_published_at: datetime
 
 
+class ShareListResponse(BaseModel):
+    shares: list[ShareStatusResponse]
+
+
 class ShareAccessEventResponse(BaseModel):
     event_id: str
     event_type: str
@@ -183,6 +187,26 @@ class AccountInfo(BaseModel):
 
 class AccountResponse(BaseModel):
     account: AccountInfo
+
+
+class CloudClaimClientInfo(BaseModel):
+    platform: str | None = Field(default=None, max_length=40)
+
+
+class CloudClaimPayload(BaseModel):
+    install_id: str = Field(min_length=1, max_length=256)
+    claim_version: int
+    plugin_id: str = Field(min_length=1, max_length=80)
+    plugin_version: str = Field(min_length=1, max_length=40)
+    obsidian_version: str | None = Field(default=None, max_length=40)
+    client: CloudClaimClientInfo | None = None
+
+
+class CloudClaimResponse(BaseModel):
+    token: str
+    account: AccountInfo
+    token_type: Literal["bearer"] = "bearer"
+    issued_at: datetime
 
 
 class AuthConfigResponse(BaseModel):

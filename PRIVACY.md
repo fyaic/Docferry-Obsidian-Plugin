@@ -6,11 +6,25 @@ DocFerry publishes only the note you choose and the explicitly referenced assets
 
 The plugin sends data to the DocFerry service selected in settings.
 
-- In DocFerry Cloud mode, the plugin sends publish, update, stop, account-status, linked-note-status, and import requests to the DocFerry Cloud endpoint operated by Bondie Labs.
+- In DocFerry Cloud mode, the plugin sends anonymous claim, publish, update, stop, account-status, linked-note-status, and import requests to the DocFerry Cloud endpoint operated by Bondie Labs.
 - In Custom server mode, the plugin sends requests to the server URL you configure.
 - If you self-host DocFerry, Bondie Labs does not receive your vault data, API token, note content, assets, share metadata, diagnostics, or logs.
 
 If you use a server operated by another person or organization, that server operator controls its storage, retention, access, availability, and terms.
+
+## Data Sent When Connecting To DocFerry Cloud
+
+When you connect to DocFerry Cloud, the plugin may send:
+
+| Data | Purpose | Storage |
+| :--- | :--- | :--- |
+| Random install ID | Claim the free Cloud token and apply abuse limits | The server stores only an HMAC hash. |
+| Plugin version | Compatibility and support diagnostics | May be recorded with the claim event. |
+| Obsidian version | Compatibility and support diagnostics | May be recorded with the claim event. |
+| Basic client platform | Compatibility and support diagnostics | May be recorded with the claim event. |
+| IP-derived rate-limit hash | Abuse prevention | The server stores a hash for rate limiting. |
+
+The random install ID is generated locally by the plugin. It is not based on your hardware, vault name, vault path, operating-system username, or machine name.
 
 ## Data Sent When Publishing
 
@@ -22,8 +36,8 @@ When you publish or update a note, the plugin may send:
 | Note markdown | Yes | The full body of the selected note is sent to the configured server. |
 | HTML snapshot | Yes, when rendering succeeds | Generated locally from Obsidian's reading view. |
 | CSS snapshot | Yes, when available | Bounded to a size limit and skips CSS rules that contain `url(...)`. |
-| Source path | Yes | Used for update, import, and link-resolution metadata. |
-| Vault identifier | Yes | A local hash derived from vault identity; used for link-resolution boundaries. |
+| Source path | Yes | Used for update, import, and link-resolution metadata; stored encrypted on DocFerry Cloud with blind indexes where matching is needed. |
+| Vault identifier | Yes | A local hash derived from vault identity; stored encrypted on DocFerry Cloud with a blind index for link-resolution boundaries. |
 | Explicitly referenced assets | Yes, when present | Images and attachments referenced by the selected note can be uploaded. |
 | Outbound note links | Yes | Used to report linked-note status and resolve already-published internal links. |
 | Share password | Only if enabled | Sent to the configured server so it can protect the share. |
@@ -41,6 +55,7 @@ The plugin stores settings in this vault's local Obsidian plugin data, including
 
 - Service mode
 - Server URL, when Custom server mode is used
+- Random anonymous install ID for DocFerry Cloud
 - Cloud token or server token
 - Default password setting
 - Default expiration setting
@@ -50,24 +65,25 @@ The plugin also writes share metadata to the published note's frontmatter so the
 
 ## Server Storage And Encryption
 
-DocFerry Cloud stores note body fields and object bytes using server-side encrypted-at-rest storage. The current implementation encrypts `Share.markdown`, `Share.html_snapshot`, and stored asset/object bytes with AES-GCM envelopes.
+DocFerry Cloud stores note body fields, object bytes, and sensitive share metadata using server-side encrypted-at-rest storage. New and updated shares encrypt `Share.markdown`, `Share.html_snapshot`, stored asset/object bytes, share title, source path, vault identifier, document identity, source hash, client metadata, asset filenames, asset original paths, asset hashes, and internal-link labels/targets with AES-GCM envelopes. The DocFerry server decrypts this data to render share pages, serve assets, verify imports, return import payloads, and show link status.
 
-This is not end-to-end encryption, client-side encryption, or zero-knowledge hosting. The DocFerry server decrypts content to render share pages, serve assets, verify imports, and return import payloads.
+Historical rows created before metadata encryption may still contain legacy plaintext metadata until the operator runs the metadata backfill tool. The server keeps legacy read fallback so older shares can still be viewed, imported, stopped, and resolved during migration.
 
-Some metadata remains plaintext so the service can route, expire, stop, count, and resolve shares:
+Fields that still need equality matching or deduplication use keyed blind indexes/HMAC indexes instead of plaintext values. This includes vault/document/path matching for internal links, link raw targets, share source hashes, and asset hashes. Blind indexes reduce plaintext exposure, but they can still reveal equality patterns to someone who has database access.
+
+Some operational metadata remains plaintext because the service needs it to route, expire, stop, count, and serve shares:
 
 - Owner/account ID
 - Share ID and slug
-- Title
-- Source path and normalized source path
 - Status, stopped time, expiration time, and timestamps
-- Asset metadata such as hash, content type, byte length, role, and original path
-- Link-resolution metadata
+- Content type, byte length, asset role, asset ID, and object storage key
 - Active-share quota counts
+
+DocFerry Cloud encrypted-at-rest storage is not end-to-end encryption and is not zero-knowledge hosting. The server has the configured encryption key and decrypts data when serving a share or import payload. DocFerry does not currently use per-share data encryption keys, KMS integration, or key rotation.
 
 Passwords are not stored as plaintext. When password protection is enabled, the server stores a password hash.
 
-DocFerry Cloud tokens are not stored as plaintext by the server. Cloud tokens are stored as HMAC-SHA256 hashes and are shown only when issued.
+DocFerry Cloud tokens are returned only to the plugin when issued and are stored locally in this vault's plugin data. The DocFerry Cloud server stores only HMAC-SHA256 token hashes. Replacement claims revoke the previous token for the same anonymous install ID and issue a new token.
 
 ## Stopping Sharing And Deleting Server Content
 
@@ -88,6 +104,7 @@ DocFerry Cloud keeps minimal operational metadata after a share is stopped so th
 
 The plugin does not send note content when it is merely enabled. Network requests happen when you:
 
+- Connect DocFerry Cloud
 - Test the server connection
 - Publish or update a note
 - Stop sharing a note

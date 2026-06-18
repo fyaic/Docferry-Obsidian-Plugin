@@ -40,6 +40,18 @@ class EncryptionService:
             return value
         return self._decrypt(envelope, aad).decode("utf-8")
 
+    def encrypt_json(self, value: Any | None, aad: str) -> str | None:
+        if value is None:
+            return None
+        payload = json.dumps(value, separators=(",", ":"), sort_keys=True)
+        return self.encrypt_text(payload, aad)
+
+    def decrypt_json(self, value: str | None, aad: str) -> Any | None:
+        payload = self.decrypt_text(value, aad)
+        if payload is None:
+            return None
+        return json.loads(payload)
+
     def encrypt_bytes(self, value: bytes, aad: str) -> bytes:
         if not self.enabled:
             return value

@@ -1,19 +1,34 @@
-import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
-import { DOCFERRY_PRODUCT_DESCRIPTION, DOCFERRY_PRODUCT_NAME, renderDocferryHeader } from "./brand";
+import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, setIcon } from "obsidian";
+import { DOCFERRY_PRODUCT_NAME, renderDocferryHeader } from "./brand";
+import { clearShareMeta, readShareMeta } from "./frontmatter";
+import {
+  isDocferryLanguage,
+  languageChangedKey,
+  languageToggleKey,
+  nextLanguage,
+  translate,
+  type DocferryLanguage,
+  type TranslationKey,
+  type TranslationValues
+} from "./i18n";
+import type { ShareListResponse, ShareMeta, ShareStatus, ShareStatusResponse } from "./types";
 
 export type ImageUploadQuality = "original" | "high" | "standard";
 export type DocferryServiceMode = "cloud" | "custom";
 
-export const DOCFERRY_CLOUD_BASE_URL = "https://docferry.fuyonder.tech";
+export const DOCFERRY_CLOUD_BASE_URL = "https://docferry.bondie.io";
+export const DOCFERRY_CLOUD_HELP_URL = "https://bondie.io/research/docferry#cloud-token";
 export const DOCFERRY_PRIVACY_URL = "https://github.com/fyaic/Docferry-Obsidian-Plugin/blob/main/PRIVACY.md";
 
 export interface DocferrySettings {
   serviceMode: DocferryServiceMode;
   serverUrl: string;
   apiToken: string;
+  anonymousInstallId: string;
   defaultPasswordEnabled: boolean;
   defaultExpiresInDays: string;
   imageUploadQuality: ImageUploadQuality;
+  language: DocferryLanguage;
   debug: boolean;
 }
 
@@ -21,9 +36,11 @@ export const DEFAULT_SETTINGS: DocferrySettings = {
   serviceMode: "cloud",
   serverUrl: "http://127.0.0.1:8787",
   apiToken: "",
+  anonymousInstallId: "",
   defaultPasswordEnabled: false,
   defaultExpiresInDays: "never",
   imageUploadQuality: "original",
+  language: "en",
   debug: false
 };
 
@@ -37,6 +54,10 @@ export function normalizeSettings(saved: unknown): DocferrySettings {
     serviceMode,
     serverUrl: serverUrl || DEFAULT_SETTINGS.serverUrl,
     apiToken: typeof data.apiToken === "string" ? data.apiToken : DEFAULT_SETTINGS.apiToken,
+    anonymousInstallId:
+      typeof data.anonymousInstallId === "string" && data.anonymousInstallId.startsWith("dfi_")
+        ? data.anonymousInstallId
+        : DEFAULT_SETTINGS.anonymousInstallId,
     defaultPasswordEnabled:
       typeof data.defaultPasswordEnabled === "boolean"
         ? data.defaultPasswordEnabled
@@ -48,6 +69,7 @@ export function normalizeSettings(saved: unknown): DocferrySettings {
     imageUploadQuality: isImageUploadQuality(data.imageUploadQuality)
       ? data.imageUploadQuality
       : DEFAULT_SETTINGS.imageUploadQuality,
+    language: isDocferryLanguage(data.language) ? data.language : DEFAULT_SETTINGS.language,
     debug: typeof data.debug === "boolean" ? data.debug : DEFAULT_SETTINGS.debug
   };
 }
@@ -79,12 +101,43 @@ function isImageUploadQuality(value: unknown): value is ImageUploadQuality {
 export interface SettingsHost {
   settings: DocferrySettings;
   saveSettings(): Promise<void>;
+  connectDocferryCloud(): Promise<boolean>;
   testConnection(): Promise<void>;
+  listShares(): Promise<ShareListResponse>;
+  refreshShareStatus(shareId: string): Promise<ShareStatusResponse>;
+  stopShareById(shareId: string, file?: TFile): Promise<boolean>;
+  stopShareForFile(file: TFile): Promise<boolean>;
+  refreshLocalizedCommands?(): void;
+}
+
+interface LocalManagedShare {
+  file: TFile;
+  meta: ShareMeta;
+}
+
+interface ManagedShare {
+  shareId?: string;
+  file?: TFile;
+  meta?: ShareMeta;
+  status?: ShareStatusResponse;
+  localTracked: boolean;
+  missingFromServer: boolean;
+}
+
+interface CachedShareStatus {
+  status?: ShareStatusResponse;
+  error?: string;
 }
 
 export class DocferrySettingTab extends PluginSettingTab {
+  private readonly shareStatusCache = new Map<string, CachedShareStatus>();
+
   constructor(app: App, private readonly host: SettingsHost & Plugin) {
     super(app, host);
+  }
+
+  private t(key: TranslationKey, values?: TranslationValues): string {
+    return translate(this.host.settings.language, key, values);
   }
 
   display(): void {
@@ -92,19 +145,20 @@ export class DocferrySettingTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.addClass("docferry-settings-tab");
 
-    renderDocferryHeader(containerEl, DOCFERRY_PRODUCT_NAME, DOCFERRY_PRODUCT_DESCRIPTION);
+    const headerEl = renderDocferryHeader(containerEl, DOCFERRY_PRODUCT_NAME, this.t("product.description"));
+    this.renderLanguageToggle(headerEl);
     containerEl.createEl("p", {
-      text: `Loaded plugin version: ${this.host.manifest.version}`,
+      text: this.t("settings.loadedVersion", { version: this.host.manifest.version }),
       cls: "setting-item-description"
     });
 
     new Setting(containerEl)
-      .setName("Service mode")
-      .setDesc("Use DocFerry Cloud by default, or connect to a custom self-hosted server.")
+      .setName(this.t("settings.serviceMode.name"))
+      .setDesc(this.t("settings.serviceMode.desc"))
       .addDropdown((dropdown) =>
         dropdown
-          .addOption("cloud", "DocFerry Cloud")
-          .addOption("custom", "Custom self-hosted server")
+          .addOption("cloud", this.t("settings.serviceMode.cloud"))
+          .addOption("custom", this.t("settings.serviceMode.custom"))
           .setValue(this.host.settings.serviceMode)
           .onChange(async (value) => {
             this.host.settings.serviceMode = value as DocferryServiceMode;
@@ -114,28 +168,20 @@ export class DocferrySettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Privacy")
-      .setDesc("Review what DocFerry sends, stores, encrypts, and deletes.")
+      .setName(this.t("settings.privacy.name"))
+      .setDesc(this.t("settings.privacy.desc"))
       .addButton((button) =>
         button
-          .setButtonText("Open privacy policy")
+          .setButtonText(this.t("settings.privacy.button"))
           .onClick(() => {
             window.open(DOCFERRY_PRIVACY_URL);
           })
       );
 
-    if (this.host.settings.serviceMode === "cloud") {
+    if (this.host.settings.serviceMode !== "cloud") {
       new Setting(containerEl)
-      .setName("DocFerry Cloud endpoint")
-      .setDesc(
-        isCloudEndpointConfigured()
-          ? "Configured for DocFerry Cloud."
-          : "DocFerry Cloud is unavailable in this build."
-      );
-    } else {
-      new Setting(containerEl)
-        .setName("Server URL")
-        .setDesc("Custom DocFerry-compatible server URL.")
+        .setName(this.t("settings.serverUrl.name"))
+        .setDesc(this.t("settings.serverUrl.desc"))
         .addText((text) =>
           text
             .setPlaceholder("http://127.0.0.1:8787")
@@ -147,39 +193,76 @@ export class DocferrySettingTab extends PluginSettingTab {
         );
     }
 
-    new Setting(containerEl)
-      .setName(this.host.settings.serviceMode === "cloud" ? "Cloud token" : "Server token")
-      .setDesc(
-        this.host.settings.serviceMode === "cloud"
-          ? "Token for DocFerry Cloud. It is stored locally in this vault's plugin data."
-          : "Token for your configured DocFerry server. It is stored locally in this vault's plugin data."
-      )
-      .addText((text) =>
-      {
+    if (this.host.settings.serviceMode === "cloud") {
+      new Setting(containerEl)
+        .setName(this.t("settings.cloud.name"))
+        .setDesc(
+          this.host.settings.apiToken
+            ? this.t("settings.cloud.connectedDesc")
+            : this.t("settings.cloud.disconnectedDesc")
+        )
+        .addButton((button) =>
+          button
+            .setButtonText(this.host.settings.apiToken ? this.t("settings.cloud.reconnect") : this.t("settings.cloud.connect"))
+            .setCta()
+            .onClick(async () => {
+              await this.host.connectDocferryCloud();
+              this.display();
+            })
+        )
+        .addButton((button) =>
+          button.setButtonText(this.t("settings.cloud.learn")).onClick(() => {
+            window.open(DOCFERRY_CLOUD_HELP_URL);
+          })
+        );
+
+      const advancedEl = containerEl.createEl("details", { cls: "docferry-advanced-token" });
+      advancedEl.createEl("summary", { text: this.t("settings.advancedToken.summary") });
+      const tokenSetting = new Setting(advancedEl)
+        .setName(this.t("settings.advancedToken.name"))
+        .setDesc(this.t("settings.advancedToken.desc"));
+      tokenSetting.settingEl.addClass("docferry-token-setting");
+      tokenSetting.addText((text) => {
         text.inputEl.type = "password";
         text
-          .setPlaceholder(this.host.settings.serviceMode === "cloud" ? "Paste Cloud token" : "Paste server token")
+          .setPlaceholder("dfc_...")
           .setValue(this.host.settings.apiToken)
           .onChange(async (value) => {
             this.host.settings.apiToken = value.trim();
             await this.host.saveSettings();
           });
       });
+    } else {
+      const tokenSetting = new Setting(containerEl)
+        .setName(this.t("settings.serverToken.name"))
+        .setDesc(this.t("settings.serverToken.desc"));
+      tokenSetting.settingEl.addClass("docferry-token-setting");
+      tokenSetting.addText((text) => {
+        text.inputEl.type = "password";
+        text
+          .setPlaceholder(this.t("settings.serverToken.placeholder"))
+          .setValue(this.host.settings.apiToken)
+          .onChange(async (value) => {
+            this.host.settings.apiToken = value.trim();
+            await this.host.saveSettings();
+          });
+      });
+    }
 
     new Setting(containerEl)
-      .setName("Test connection")
-      .setDesc("Checks the selected DocFerry service and validates the token when supported.")
+      .setName(this.t("settings.testConnection.name"))
+      .setDesc(this.t("settings.testConnection.desc"))
       .addButton((button) =>
         button
-          .setButtonText("Test")
+          .setButtonText(this.t("settings.testConnection.button"))
           .onClick(async () => {
             await this.host.testConnection();
           })
       );
 
     new Setting(containerEl)
-      .setName("Password by default")
-      .setDesc("Preselect password protection in the publish dialog.")
+      .setName(this.t("settings.passwordDefault.name"))
+      .setDesc(this.t("settings.passwordDefault.desc"))
       .addToggle((toggle) =>
         toggle
           .setValue(this.host.settings.defaultPasswordEnabled)
@@ -190,12 +273,12 @@ export class DocferrySettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Default expiration")
-      .setDesc("Used as the initial value in the publish dialog.")
+      .setName(this.t("settings.defaultExpiration.name"))
+      .setDesc(this.t("settings.defaultExpiration.desc"))
       .addDropdown((dropdown) =>
         dropdown
-          .addOption("never", "Never")
-          .addOption("30", "30 days")
+          .addOption("never", this.t("settings.expiration.never"))
+          .addOption("30", this.t("settings.expiration.thirtyDays"))
           .setValue(this.host.settings.defaultExpiresInDays)
           .onChange(async (value) => {
             this.host.settings.defaultExpiresInDays = value;
@@ -204,18 +287,318 @@ export class DocferrySettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Image quality")
-      .setDesc("This free version uploads original image bytes. Image optimization is reserved for a future release.");
+      .setName(this.t("settings.imageQuality.name"))
+      .setDesc(this.t("settings.imageQuality.desc"));
 
     new Setting(containerEl)
-      .setName("Debug logging")
-      .setDesc("Logs publish details to the developer console.")
+      .setName(this.t("settings.debug.name"))
+      .setDesc(this.t("settings.debug.desc"))
       .addToggle((toggle) =>
         toggle.setValue(this.host.settings.debug).onChange(async (value) => {
           this.host.settings.debug = value;
           await this.host.saveSettings();
-          new Notice(value ? "Debug logging enabled" : "Debug logging disabled");
+          new Notice(value ? this.t("settings.debug.enabled") : this.t("settings.debug.disabled"));
         })
       );
+
+    const shareManagementEl = containerEl.createDiv({ cls: "docferry-share-management" });
+    void this.renderShareManagement(shareManagementEl);
   }
+
+  private renderLanguageToggle(headerEl: HTMLElement): void {
+    const language = this.host.settings.language;
+    const button = headerEl.createEl("button", {
+      cls: "docferry-language-toggle",
+      attr: {
+        type: "button",
+        "aria-label": this.t(languageToggleKey(language)),
+        title: this.t(languageToggleKey(language))
+      }
+    });
+    setIcon(button, "globe-2");
+    button.addEventListener("click", async () => {
+      this.host.settings.language = nextLanguage(this.host.settings.language);
+      await this.host.saveSettings();
+      this.host.refreshLocalizedCommands?.();
+      new Notice(this.t(languageChangedKey(this.host.settings.language)));
+      this.display();
+    });
+  }
+
+  private async renderShareManagement(sectionEl: HTMLElement): Promise<void> {
+    sectionEl.empty();
+    this.renderShareManagementLoading(sectionEl);
+
+    const localShares = this.collectLocalShares();
+    let serverShares: ShareStatusResponse[] = [];
+    let listError: string | undefined;
+    try {
+      const response = await this.host.listShares();
+      serverShares = response.shares;
+      for (const share of serverShares) {
+        this.shareStatusCache.set(share.share_id, { status: share });
+      }
+    } catch (error) {
+      listError = this.errorMessage(error);
+    }
+
+    const shares = this.mergeManagedShares(localShares, serverShares, !listError);
+    sectionEl.empty();
+
+    const headerEl = sectionEl.createDiv({ cls: "docferry-share-management-header" });
+    const copyEl = headerEl.createDiv({ cls: "docferry-share-management-copy" });
+    copyEl.createEl("h3", { text: this.t("shares.title") });
+    const shareWord = shares.length === 1 ? this.t("shares.shareSingular") : this.t("shares.sharePlural");
+    copyEl.createEl("p", {
+      text: this.t("shares.accountCount", { count: shares.length, shareWord }),
+      cls: "setting-item-description"
+    });
+
+    const actionsEl = headerEl.createDiv({ cls: "docferry-share-management-actions" });
+    this.createActionButton(actionsEl, this.t("shares.refreshServer"), async () => {
+      await this.renderShareManagement(sectionEl);
+    });
+
+    if (listError) {
+      sectionEl.createDiv({
+        text: this.t("shares.listUnavailable", { error: listError }),
+        cls: "docferry-share-error"
+      });
+    }
+
+    const listEl = sectionEl.createDiv({ cls: "docferry-share-list" });
+    if (!shares.length) {
+      listEl.createDiv({
+        text: listError ? this.t("shares.emptyLocal") : this.t("shares.emptyAccount"),
+        cls: "docferry-share-empty"
+      });
+      return;
+    }
+
+    for (const share of shares) {
+      this.renderShareRow(listEl, sectionEl, share);
+    }
+  }
+
+  private renderShareManagementLoading(sectionEl: HTMLElement): void {
+    const headerEl = sectionEl.createDiv({ cls: "docferry-share-management-header" });
+    const copyEl = headerEl.createDiv({ cls: "docferry-share-management-copy" });
+    copyEl.createEl("h3", { text: this.t("shares.title") });
+    copyEl.createEl("p", {
+      text: this.t("shares.loading"),
+      cls: "setting-item-description"
+    });
+  }
+
+  private collectLocalShares(): LocalManagedShare[] {
+    return this.app.vault
+      .getMarkdownFiles()
+      .map((file) => ({ file, meta: readShareMeta(this.app, file) }))
+      .filter((share) => Boolean(share.meta.id || share.meta.url))
+      .sort((left, right) => {
+        const byUpdated = timestamp(right.meta.updated) - timestamp(left.meta.updated);
+        return byUpdated || left.file.path.localeCompare(right.file.path);
+      });
+  }
+
+  private mergeManagedShares(
+    localShares: LocalManagedShare[],
+    serverShares: ShareStatusResponse[],
+    serverLoaded: boolean
+  ): ManagedShare[] {
+    const localById = new Map<string, LocalManagedShare>();
+    for (const share of localShares) {
+      if (share.meta.id) localById.set(share.meta.id, share);
+    }
+
+    const usedLocalFiles = new Set<string>();
+    const merged: ManagedShare[] = serverShares.map((status) => {
+      const local = localById.get(status.share_id);
+      if (local) usedLocalFiles.add(local.file.path);
+      return {
+        shareId: status.share_id,
+        file: local?.file,
+        meta: local?.meta,
+        status,
+        localTracked: Boolean(local),
+        missingFromServer: false
+      };
+    });
+
+    for (const local of localShares) {
+      if (usedLocalFiles.has(local.file.path)) continue;
+      const cached = local.meta.id ? this.shareStatusCache.get(local.meta.id)?.status : undefined;
+      merged.push({
+        shareId: local.meta.id,
+        file: local.file,
+        meta: local.meta,
+        status: cached,
+        localTracked: true,
+        missingFromServer: serverLoaded && Boolean(local.meta.id)
+      });
+    }
+
+    return merged.sort((left, right) => {
+      const byUpdated = timestamp(right.status?.updated_at || right.meta?.updated) - timestamp(left.status?.updated_at || left.meta?.updated);
+      const leftLabel = left.status?.source_path || left.file?.path || left.shareId || "";
+      const rightLabel = right.status?.source_path || right.file?.path || right.shareId || "";
+      return byUpdated || leftLabel.localeCompare(rightLabel);
+    });
+  }
+
+  private renderShareRow(listEl: HTMLElement, sectionEl: HTMLElement, share: ManagedShare): void {
+    const cached = share.shareId ? this.shareStatusCache.get(share.shareId) : undefined;
+    const status: DisplayShareStatus =
+      share.missingFromServer ? "not_in_account" : share.status?.status ?? cached?.status?.status ?? "tracked";
+    const title = share.status?.title || cached?.status?.title || share.file?.basename || share.meta?.url || share.shareId || this.t("shares.untitled");
+    const sourcePath = share.file?.path || share.status?.source_path || cached?.status?.source_path || this.t("shares.notLinked");
+    const shareUrl = share.status?.url || cached?.status?.url || share.meta?.url;
+
+    const rowEl = listEl.createDiv({ cls: "docferry-share-row" });
+    const mainEl = rowEl.createDiv({ cls: "docferry-share-row-main" });
+    const titleLineEl = mainEl.createDiv({ cls: "docferry-share-title-line" });
+    titleLineEl.createDiv({ text: title, cls: "docferry-share-title" });
+    titleLineEl.createSpan({
+      text: formatShareStatus(status, (key) => this.t(key)),
+      cls: `docferry-share-status docferry-share-status-${status}`
+    });
+
+    mainEl.createDiv({ text: sourcePath, cls: "docferry-share-path" });
+
+    const detailsEl = mainEl.createDiv({ cls: "docferry-share-details" });
+    detailsEl.createSpan({
+      text: this.t("shares.updated", {
+        date: formatDate(share.status?.updated_at || cached?.status?.updated_at || share.meta?.updated, this.host.settings.language, (key) => this.t(key))
+      })
+    });
+    const expires = share.status?.expires_at || cached?.status?.expires_at || share.meta?.expires;
+    if (expires) {
+      detailsEl.createSpan({
+        text: this.t("shares.expires", {
+          date: formatDate(expires, this.host.settings.language, (key) => this.t(key))
+        })
+      });
+    }
+    if (share.status?.password_enabled || cached?.status?.password_enabled || share.meta?.passwordEnabled) {
+      detailsEl.createSpan({ text: this.t("shares.passwordProtected") });
+    }
+    detailsEl.createSpan({ text: share.localTracked ? this.t("shares.trackedInVault") : this.t("shares.serverOnly") });
+    if (cached?.error) {
+      detailsEl.createSpan({ text: this.t("shares.statusRefreshFailed", { error: cached.error }), cls: "docferry-share-error" });
+    }
+
+    const actionsEl = rowEl.createDiv({ cls: "docferry-share-row-actions" });
+    const openNoteButton = this.createActionButton(actionsEl, this.t("shares.openNote"), async () => {
+      if (share.file) await this.app.workspace.getLeaf(true).openFile(share.file);
+    });
+    openNoteButton.disabled = !share.file;
+
+    const copyButton = this.createActionButton(actionsEl, this.t("shares.copyLink"), async () => {
+      if (!shareUrl) return;
+      await navigator.clipboard.writeText(shareUrl);
+      new Notice(this.t("notice.shareLinkCopied"));
+    });
+    copyButton.disabled = !shareUrl;
+
+    const openShareButton = this.createActionButton(actionsEl, this.t("shares.openShare"), async () => {
+      if (shareUrl) window.open(shareUrl);
+    });
+    openShareButton.disabled = !shareUrl;
+
+    const refreshButton = this.createActionButton(actionsEl, this.t("shares.refresh"), async () => {
+      if (!share.shareId) return;
+      await this.refreshOneShareStatus(sectionEl, share.shareId);
+    });
+    refreshButton.disabled = !share.shareId;
+
+    const stopButton = this.createActionButton(actionsEl, this.t("shares.stop"), async () => {
+      if (!share.shareId) return;
+      if (!window.confirm(this.t("shares.confirmStop", { title }))) return;
+      const stopped = await this.host.stopShareById(share.shareId, share.file);
+      if (stopped) {
+        this.shareStatusCache.delete(share.shareId);
+        await this.renderShareManagement(sectionEl);
+      }
+    });
+    stopButton.disabled = !share.shareId || status === "stopped";
+
+    if (share.file && share.localTracked) {
+      this.createActionButton(actionsEl, this.t("shares.removeLocalRecord"), async () => {
+        if (!share.file) return;
+        if (!window.confirm(this.t("shares.confirmRemoveLocal", { title: share.file.basename }))) return;
+        await clearShareMeta(this.app, share.file);
+        if (share.shareId) this.shareStatusCache.delete(share.shareId);
+        new Notice(this.t("shares.localRecordRemoved"));
+        await this.renderShareManagement(sectionEl);
+      });
+    }
+  }
+
+  private async refreshOneShareStatus(sectionEl: HTMLElement, shareId: string): Promise<void> {
+    await this.fetchShareStatus(shareId);
+    await this.renderShareManagement(sectionEl);
+  }
+
+  private async fetchShareStatus(shareId: string): Promise<void> {
+    try {
+      const status = await this.host.refreshShareStatus(shareId);
+      this.shareStatusCache.set(shareId, { status });
+    } catch (error) {
+      this.shareStatusCache.set(shareId, { error: this.errorMessage(error) });
+    }
+  }
+
+  private errorMessage(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    return this.t("error.unknown");
+  }
+
+  private createActionButton(
+    containerEl: HTMLElement,
+    label: string,
+    onClick: () => Promise<void>
+  ): HTMLButtonElement {
+    const button = containerEl.createEl("button", { text: label });
+    button.type = "button";
+    button.addEventListener("click", () => {
+      void onClick();
+    });
+    return button;
+  }
+}
+
+type DisplayShareStatus = ShareStatus | "tracked" | "not_in_account";
+
+function formatShareStatus(status: DisplayShareStatus, t: (key: TranslationKey) => string): string {
+  switch (status) {
+    case "published":
+      return t("shareStatus.published");
+    case "password_protected":
+      return t("shareStatus.passwordProtected");
+    case "expired":
+      return t("shareStatus.expired");
+    case "stopped":
+      return t("shareStatus.stopped");
+    case "tracked":
+      return t("shareStatus.tracked");
+    case "not_in_account":
+      return t("shareStatus.notInAccount");
+  }
+}
+
+function formatDate(
+  value: string | null | undefined,
+  language: DocferryLanguage,
+  t: (key: TranslationKey) => string
+): string {
+  if (!value) return t("date.unknown");
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString(language === "zh-CN" ? "zh-CN" : "en");
+}
+
+function timestamp(value?: string | null): number {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
 }

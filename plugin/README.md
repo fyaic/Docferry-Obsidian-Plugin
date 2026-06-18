@@ -21,19 +21,22 @@ Public plugin identity:
 - Update, copy, and stop the current note's share link.
 - Import one DocFerry share URL into the current vault.
 - Show linked-note status for the current published note.
-- Write `df_*` frontmatter fields and read legacy `docferry_share_*` and `fuyou_share_*` fields for migration.
+- List account shares from the selected service in plugin settings, with local vault records merged when available.
+- Write `df_*` frontmatter fields used to update, copy, or stop a share later.
 - Upload explicitly referenced local images and attachments through the configured DocFerry server.
 - Capture a bounded Obsidian HTML and CSS reading-view snapshot.
-- Use DocFerry Cloud by default when the public Cloud endpoint is configured.
+- Use DocFerry Cloud by default without asking users for a server URL.
 - Show active-share quota status when the selected service supports `GET /v0/account`.
 
 ## Free Plugin Boundary
 
-This branch is the free and open-source plugin line. It does not expose team-login, SSO, paid-license, or paid hosted-account flows. Users can publish with DocFerry Cloud using a manually issued Cloud token, or switch to a custom self-hosted DocFerry-compatible server.
+This branch is the free and open-source plugin line. It does not expose team-login, SSO, paid-license, or paid hosted-account flows. Users can connect to DocFerry Cloud anonymously inside the plugin, or switch to a custom self-hosted DocFerry-compatible server.
 
-DocFerry Cloud includes 10 active shares for the free plugin path. A stopped or expired share does not count toward that active-share quota. Custom servers control their own quotas.
+In DocFerry Cloud mode, users do not configure a server URL, sign in, use OAuth, or copy/paste a token. The settings tab includes a `Connect DocFerry Cloud` button that claims a free anonymous Cloud token and stores it locally in this vault's plugin data.
 
-DocFerry Cloud uses encrypted-at-rest storage for note body fields and object bytes. This is server-side encryption, not end-to-end encryption or zero-knowledge hosting. The settings tab links to the public privacy notice under `Service mode`, and stopping a share revokes access and removes that share's server-side content and non-reused object bytes.
+DocFerry Cloud includes 5 active shares for the free plugin path. A stopped or expired share does not count toward that active-share quota. Custom servers control their own quotas.
+
+DocFerry Cloud uses encrypted-at-rest storage for note body fields and object bytes. The DocFerry server decrypts content when serving share pages, assets, and import payloads. The settings tab links to the public privacy notice under `Service mode`, and stopping a share revokes access and removes that share's server-side content and non-reused object bytes.
 
 ## Development
 

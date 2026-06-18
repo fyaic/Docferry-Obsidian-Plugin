@@ -47,7 +47,7 @@ class Client:
         auth: bool = False,
     ) -> Response:
         data = None
-        headers = {"User-Agent": "DocferryCLI/0.0.1"}
+        headers = {"User-Agent": "DocferryCLI/0.0.6"}
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
@@ -68,7 +68,7 @@ class Client:
     def get_bytes(self, path_or_url: str) -> BinaryResponse:
         parsed = urlparse(path_or_url)
         url = path_or_url if parsed.scheme and parsed.netloc else urljoin(f"{self.base_url}/", path_or_url.lstrip("/"))
-        request = Request(url, headers={"User-Agent": "DocferryCLI/0.0.1"}, method="GET")
+        request = Request(url, headers={"User-Agent": "DocferryCLI/0.0.6"}, method="GET")
         try:
             response = self.opener.open(request, timeout=30)
             return BinaryResponse(response.status, response.read())
@@ -177,7 +177,7 @@ def share_payload(args: argparse.Namespace, *, is_update: bool = False) -> dict[
         "expires_at": args.expires_at,
         "client": {
             "plugin_id": "docferry-cli",
-            "plugin_version": "0.0.1",
+            "plugin_version": "0.0.6",
             "obsidian_version": "cli",
         },
     }

@@ -1,5 +1,6 @@
 import { App, Modal, Notice, Setting } from "obsidian";
 import { renderDocferryHeader } from "./brand";
+import type { Translate } from "./i18n";
 
 export interface ImportShareOptions {
   url: string;
@@ -16,7 +17,11 @@ export class ImportShareModal extends Modal {
   private outputFolder = "Docferry Imports";
   private overwrite = false;
 
-  constructor(app: App, initialUrl = "") {
+  constructor(
+    app: App,
+    initialUrl: string,
+    private readonly t: Translate
+  ) {
     super(app);
     this.url = initialUrl;
   }
@@ -31,14 +36,14 @@ export class ImportShareModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
-    renderDocferryHeader(contentEl, "Import share URL", "Import one DocFerry document into this vault.");
+    renderDocferryHeader(contentEl, this.t("modal.import.title"), this.t("modal.import.description"));
 
     new Setting(contentEl)
-      .setName("Share URL")
-      .setDesc("Import one DocFerry share into this vault.")
+      .setName(this.t("modal.import.url"))
+      .setDesc(this.t("modal.import.urlDesc"))
       .addText((text) => {
         text
-          .setPlaceholder("https://docferry.example/s/abc123")
+          .setPlaceholder(this.t("modal.import.urlPlaceholder"))
           .setValue(this.url)
           .onChange((value) => {
             this.url = value.trim();
@@ -47,18 +52,18 @@ export class ImportShareModal extends Modal {
       });
 
     new Setting(contentEl)
-      .setName("Password")
-      .setDesc("Optional. Required only when the share is password protected.")
+      .setName(this.t("modal.import.password"))
+      .setDesc(this.t("modal.import.passwordDesc"))
       .addText((text) => {
         text.inputEl.type = "password";
-        text.setPlaceholder("Optional password").onChange((value) => {
+        text.setPlaceholder(this.t("modal.import.passwordPlaceholder")).onChange((value) => {
           this.password = value;
         });
       });
 
     new Setting(contentEl)
-      .setName("Output folder")
-      .setDesc("The imported note and explicitly referenced assets are written under this vault folder.")
+      .setName(this.t("modal.import.outputFolder"))
+      .setDesc(this.t("modal.import.outputFolderDesc"))
       .addText((text) =>
         text.setValue(this.outputFolder).onChange((value) => {
           this.outputFolder = value.trim();
@@ -66,8 +71,8 @@ export class ImportShareModal extends Modal {
       );
 
     new Setting(contentEl)
-      .setName("Overwrite existing files")
-      .setDesc("When disabled, import stops if the note or an asset already exists.")
+      .setName(this.t("modal.import.overwrite"))
+      .setDesc(this.t("modal.import.overwriteDesc"))
       .addToggle((toggle) =>
         toggle.setValue(this.overwrite).onChange((value) => {
           this.overwrite = value;
@@ -75,17 +80,17 @@ export class ImportShareModal extends Modal {
       );
 
     const buttons = contentEl.createDiv({ cls: "modal-button-container" });
-    buttons.createEl("button", { text: "Cancel" }).addEventListener("click", () => {
+    buttons.createEl("button", { text: this.t("modal.import.cancel") }).addEventListener("click", () => {
       this.finish(null);
     });
-    buttons.createEl("button", { text: "Import", cls: "mod-cta" }).addEventListener("click", () => {
+    buttons.createEl("button", { text: this.t("modal.import.import"), cls: "mod-cta" }).addEventListener("click", () => {
       if (!isValidShareUrl(this.url)) {
-        new Notice("Enter a valid DocFerry share URL.");
+        new Notice(this.t("modal.import.invalidUrl"));
         return;
       }
       const outputFolder = normalizeVaultFolder(this.outputFolder);
       if (!outputFolder) {
-        new Notice("Output folder is required.");
+        new Notice(this.t("modal.import.outputRequired"));
         return;
       }
       this.finish({

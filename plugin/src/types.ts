@@ -107,6 +107,10 @@ export interface ShareStatusResponse {
   last_published_at: string;
 }
 
+export interface ShareListResponse {
+  shares: ShareStatusResponse[];
+}
+
 export interface ShareLinkStatusResponse {
   link_id: string;
   raw_target: string;

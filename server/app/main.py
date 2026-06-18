@@ -19,7 +19,15 @@ from .database import init_database, make_engine, make_session_factory, session_
 from .encryption import EncryptionService, asset_bytes_aad, share_html_aad, share_markdown_aad
 from .errors import ApiError, api_error_handler, error_envelope
 from .logging import configure_logging
+from .metadata_security import (
+    blind_index,
+    decrypt_metadata_json,
+    decrypt_metadata_text,
+    encrypt_metadata_json,
+    encrypt_metadata_text,
+)
 from .models import Asset, Share, ShareAccessEvent, ShareAsset, ShareLink, utc_now
+from .models import CloudClaimEvent, CloudInstall, User, UserToken
 from .schemas import (
     AssetResponse,
     AssetUploadCompletePayload,
@@ -31,12 +39,15 @@ from .schemas import (
     AccountResponse,
     AuthConfigResponse,
     AuthExchangePayload,
+    CloudClaimPayload,
+    CloudClaimResponse,
     DeleteShareResponse,
     HealthResponse,
     PasswordPayload,
     ShareAccessEventResponse,
     ShareAccessEventsResponse,
     ShareImportPayloadResponse,
+    ShareListResponse,
     ShareLinksResponse,
     ShareLinkStatusResponse,
     SharePayload,
@@ -49,7 +60,11 @@ from .security import (
     access_cookie_name,
     generate_prefixed_id,
     generate_slug,
+    hash_cloud_claim_ip,
+    hash_cloud_install_id,
+    hash_cloud_token,
     hash_password,
+    make_cloud_token,
     require_bearer_token,
     sign_share_access,
     verify_password,
@@ -137,8 +152,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def auth_config(settings: Settings = Depends(get_settings)) -> AuthConfigResponse:
         _ = settings
         return AuthConfigResponse(
-            provider="manual_token",
-            login_url="",
+            provider="anonymous_cloud_claim",
+            login_url="/v0/cloud/claim",
             callback_protocol="docferry",
         )
 
@@ -148,10 +163,105 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse(
             status_code=501,
             content=error_envelope(
-                "manual_token_only",
-                "DocFerry uses manually issued Cloud tokens in this release.",
+                "cloud_claim_required",
+                "DocFerry Cloud uses in-plugin anonymous claim in this release.",
                 request.state.request_id,
             ),
+        )
+
+    @app.post("/v0/cloud/claim", response_model=CloudClaimResponse)
+    def claim_cloud_token(
+        payload: CloudClaimPayload,
+        request: Request,
+        db: Session = Depends(get_db),
+        settings: Settings = Depends(get_settings),
+    ) -> CloudClaimResponse:
+        if not settings.cloud_claim_enabled:
+            raise ApiError(403, "cloud_claim_disabled", "DocFerry Cloud automatic claim is temporarily unavailable.")
+        if payload.claim_version != 1 or payload.plugin_id != "docferry" or not payload.plugin_version.strip():
+            raise ApiError(400, "invalid_claim_request", "Invalid DocFerry Cloud claim request.")
+
+        install_id = payload.install_id.strip()
+        if not is_valid_cloud_install_id(install_id):
+            raise ApiError(400, "invalid_install_id", "Install ID must be a random dfi_ value generated locally.")
+
+        now = utc_now()
+        install_id_hash = hash_cloud_install_id(install_id, settings)
+        requester_ip = request_ip(request, settings) or ""
+        claim_ip_hash = hash_cloud_claim_ip(requester_ip, settings) if requester_ip else None
+
+        if is_cloud_claim_rate_limited(db, settings, install_id_hash, claim_ip_hash, now):
+            record_cloud_claim_event(db, install_id_hash, claim_ip_hash, "rate_limited", payload, now)
+            db.commit()
+            raise ApiError(429, "cloud_claim_rate_limited", "Too many DocFerry Cloud claim attempts. Please try again later.")
+
+        install = db.execute(
+            select(CloudInstall).where(CloudInstall.install_id_hash == install_id_hash)
+        ).scalar_one_or_none()
+        result = "issued"
+        if install is None:
+            user = User(
+                id=generate_prefixed_id("usr_anon"),
+                email=None,
+                display_name="Anonymous DocFerry Cloud user",
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(user)
+            db.flush()
+            install = CloudInstall(
+                id=generate_prefixed_id("ins"),
+                install_id_hash=install_id_hash,
+                user_id=user.id,
+                first_claimed_at=now,
+                last_claimed_at=now,
+                replacement_count=0,
+                last_ip_hash=claim_ip_hash,
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(install)
+        else:
+            result = "replaced"
+            install.last_claimed_at = now
+            install.replacement_count += 1
+            install.last_ip_hash = claim_ip_hash
+            install.updated_at = now
+            active_tokens = db.execute(
+                select(UserToken).where(UserToken.install_id == install.id, UserToken.revoked_at.is_(None))
+            ).scalars()
+            for token_row in active_tokens:
+                token_row.revoked_at = now
+                token_row.updated_at = now
+
+        token = make_cloud_token()
+        db.add(
+            UserToken(
+                id=generate_prefixed_id("tok"),
+                user_id=install.user_id,
+                install_id=install.id,
+                token_hash=hash_cloud_token(token, settings),
+                label="anonymous-free",
+                active_share_limit=settings.default_active_share_limit,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        record_cloud_claim_event(db, install_id_hash, claim_ip_hash, result, payload, now)
+
+        active_shares = active_share_count(db, install.user_id)
+        remaining = max(settings.default_active_share_limit - active_shares, 0)
+        return CloudClaimResponse(
+            token=token,
+            account=AccountInfo(
+                owner_id=install.user_id,
+                mode="cloud",
+                token_label="anonymous-free",
+                active_shares=active_shares,
+                active_share_limit=settings.default_active_share_limit,
+                remaining_active_shares=remaining,
+            ),
+            issued_at=now,
         )
 
     @app.post("/v0/assets/intents", response_model=AssetUploadIntentResponse)
@@ -166,17 +276,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         content_type = normalized_content_type(payload.content_type)
         validate_asset_upload_metadata(payload.byte_length, content_type, payload.hash, settings)
 
-        existing = db.execute(
-            select(Asset).where(Asset.owner_id == auth.user_id, Asset.hash == payload.hash)
-        ).scalar_one_or_none()
+        existing = find_asset_by_hash(db, auth.user_id, payload.hash, settings)
         if existing:
             existing.last_used_at = utc_now()
-            return AssetUploadIntentResponse(mode="already_uploaded", asset=asset_response(existing))
+            return AssetUploadIntentResponse(mode="already_uploaded", asset=asset_response(existing, encryption))
 
         validate_owner_asset_quota(db, auth.user_id, payload.byte_length, settings)
-        storage_key = storage.storage_key(auth.user_id, payload.hash)
+        asset_id = generate_prefixed_id("asset")
+        storage_key = storage.asset_storage_key(auth.user_id, asset_id)
         if encryption.enabled or not cos_direct_upload_configured(settings):
-            return AssetUploadIntentResponse(mode="api_proxy", storage_key=storage_key, fallback_url="/v0/assets")
+            return AssetUploadIntentResponse(
+                mode="api_proxy",
+                asset_id=asset_id,
+                storage_key=storage_key,
+                fallback_url="/v0/assets",
+            )
 
         try:
             target = create_cos_upload_target(settings, storage_key)
@@ -186,7 +300,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         return AssetUploadIntentResponse(
             mode="tencent_cos",
-            asset_id=generate_prefixed_id("asset"),
+            asset_id=asset_id,
             storage_key=storage_key,
             upload=AssetUploadTarget(
                 provider="tencent_cos",
@@ -221,23 +335,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> AssetResponse:
         content_type = normalized_content_type(payload.content_type)
         validate_asset_upload_metadata(payload.byte_length, content_type, payload.hash, settings)
-        expected_storage_key = storage.storage_key(auth.user_id, payload.hash)
-        if payload.storage_key != expected_storage_key:
+        expected_storage_keys = {
+            storage.asset_storage_key(auth.user_id, asset_id),
+            storage.storage_key(auth.user_id, payload.hash),
+        }
+        if payload.storage_key not in expected_storage_keys:
             raise ApiError(400, "invalid_storage_key", "Asset storage key does not match hash.")
 
         existing_id = db.get(Asset, asset_id)
         if existing_id:
-            if existing_id.hash != payload.hash:
+            if asset_hash_value(encryption, existing_id) != payload.hash:
                 raise ApiError(409, "asset_id_conflict", "Asset id already belongs to another upload.")
             existing_id.last_used_at = utc_now()
-            return asset_response(existing_id)
+            return asset_response(existing_id, encryption)
 
-        existing = db.execute(
-            select(Asset).where(Asset.owner_id == auth.user_id, Asset.hash == payload.hash)
-        ).scalar_one_or_none()
+        existing = find_asset_by_hash(db, auth.user_id, payload.hash, settings)
         if existing:
             existing.last_used_at = utc_now()
-            return asset_response(existing)
+            return asset_response(existing, encryption)
 
         validate_owner_asset_quota(db, auth.user_id, payload.byte_length, settings)
         final_asset_id = asset_id if asset_id.startswith("asset_") else generate_prefixed_id("asset")
@@ -254,18 +369,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         asset = Asset(
             id=final_asset_id,
             owner_id=auth.user_id,
-            hash=payload.hash,
-            filename=safe_asset_filename(payload.filename),
+            hash=f"{METADATA_HASH_PREFIX}{final_asset_id}",
+            filename=METADATA_FILENAME_PLACEHOLDER,
             content_type=content_type,
             byte_length=payload.byte_length,
             storage_key=payload.storage_key,
             public_url=None,
             last_used_at=utc_now(),
         )
+        apply_asset_metadata(asset, encryption, settings, payload.hash, payload.filename)
         storage.put(asset.storage_key, encryption.encrypt_bytes(completed_data, asset_bytes_aad(asset.id)))
         db.add(asset)
         db.flush()
-        return asset_response(asset)
+        return asset_response(asset, encryption)
 
     @app.post("/v0/assets", response_model=AssetResponse)
     async def upload_asset(
@@ -285,30 +401,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if expected_hash != actual_hash:
             raise ApiError(400, "asset_hash_mismatch", "Asset hash does not match request body.")
 
-        existing = db.execute(
-            select(Asset).where(Asset.owner_id == auth.user_id, Asset.hash == actual_hash)
-        ).scalar_one_or_none()
+        existing = find_asset_by_hash(db, auth.user_id, actual_hash, settings)
         if existing:
             existing.last_used_at = utc_now()
-            return asset_response(existing)
+            return asset_response(existing, encryption)
 
         validate_owner_asset_quota(db, auth.user_id, len(body), settings)
 
+        asset_id = generate_prefixed_id("asset")
         asset = Asset(
-            id=generate_prefixed_id("asset"),
+            id=asset_id,
             owner_id=auth.user_id,
-            hash=actual_hash,
-            filename=safe_asset_filename(request.headers.get("x-share-asset-filename")),
+            hash=f"{METADATA_HASH_PREFIX}{asset_id}",
+            filename=METADATA_FILENAME_PLACEHOLDER,
             content_type=content_type,
             byte_length=len(body),
-            storage_key=storage.storage_key(auth.user_id, actual_hash),
+            storage_key=storage.asset_storage_key(auth.user_id, asset_id),
             public_url=None,
             last_used_at=utc_now(),
+        )
+        apply_asset_metadata(
+            asset,
+            encryption,
+            settings,
+            actual_hash,
+            safe_asset_filename(request.headers.get("x-share-asset-filename")),
         )
         storage.put(asset.storage_key, encryption.encrypt_bytes(body, asset_bytes_aad(asset.id)))
         db.add(asset)
         db.flush()
-        return asset_response(asset)
+        return asset_response(asset, encryption)
 
     @app.post("/v0/shares", response_model=ShareResponse)
     def create_share(
@@ -349,28 +471,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             id=share_id,
             owner_id=auth.user_id,
             slug=unique_slug(db),
-            title=resolved_payload_title(payload),
-            vault_id=payload.vault_id,
-            source_path=payload.source_path,
-            source_path_normalized=payload.source_path_normalized or normalize_share_path(payload.source_path),
-            doc_identity=payload.doc_identity,
-            source_hash=payload.source_hash,
+            title=METADATA_TITLE_PLACEHOLDER,
+            vault_id=None,
+            source_path=METADATA_PATH_PLACEHOLDER,
+            source_path_normalized=None,
+            doc_identity=None,
+            source_hash=f"{METADATA_HASH_PREFIX}{share_id}",
             markdown=markdown,
             markdown_asset_id=markdown_asset_id,
             html_snapshot=html_snapshot,
             html_snapshot_asset_id=html_snapshot_asset_id,
             render_mode="html_snapshot" if payload.html_snapshot else "markdown_fallback",
             css_asset_id=payload.css_asset_id,
-            assets=[asset.model_dump(exclude_none=True) for asset in payload.assets],
-            client=payload.client.model_dump(),
+            assets=[],
+            client={},
             password_hash=hash_password(payload.password) if payload.password else None,
             expires_at=payload.expires_at,
             last_published_at=utc_now(),
         )
+        apply_share_metadata(share, payload, encryption, settings)
         db.add(share)
         db.flush()
-        replace_share_assets(db, share, payload.assets)
-        replace_share_links(db, share, payload.outbound_links)
+        replace_share_assets(db, share, payload.assets, encryption)
+        replace_share_links(db, share, payload.outbound_links, encryption, settings)
         return share_response(share, request, settings, include_created=True)
 
     @app.put("/v0/shares/{share_id}", response_model=ShareResponse)
@@ -412,20 +535,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             share_html_aad(share.id),
         )
 
-        share.title = resolved_payload_title(payload)
-        share.vault_id = payload.vault_id
-        share.source_path = payload.source_path
-        share.source_path_normalized = payload.source_path_normalized or normalize_share_path(payload.source_path)
-        share.doc_identity = payload.doc_identity
-        share.source_hash = payload.source_hash
+        apply_share_metadata(share, payload, encryption, settings)
         share.markdown = markdown
         share.markdown_asset_id = markdown_asset_id
         share.html_snapshot = html_snapshot
         share.html_snapshot_asset_id = html_snapshot_asset_id
         share.render_mode = "html_snapshot" if payload.html_snapshot else "markdown_fallback"
         share.css_asset_id = payload.css_asset_id
-        share.assets = [asset.model_dump(exclude_none=True) for asset in payload.assets]
-        share.client = payload.client.model_dump()
         share.expires_at = payload.expires_at
         share.updated_at = utc_now()
         share.last_published_at = share.updated_at
@@ -440,10 +556,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             share.password_hash = hash_password(payload.password)
 
         db.flush()
-        replace_share_assets(db, share, payload.assets)
-        replace_share_links(db, share, payload.outbound_links)
+        replace_share_assets(db, share, payload.assets, encryption)
+        replace_share_links(db, share, payload.outbound_links, encryption, settings)
         prune_unreferenced_assets(db, storage, previous_asset_ids)
         return share_response(share, request, settings, include_created=False)
+
+    @app.get("/v0/shares", response_model=ShareListResponse)
+    def list_shares(
+        request: Request,
+        include_stopped: bool = Query(default=True),
+        limit: int = Query(default=100, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
+        auth: AuthContext = Depends(require_auth),
+        db: Session = Depends(get_db),
+        settings: Settings = Depends(get_settings),
+        encryption: EncryptionService = Depends(get_encryption),
+    ) -> ShareListResponse:
+        statement = select(Share).where(Share.owner_id == auth.user_id)
+        if not include_stopped:
+            statement = statement.where(Share.stopped_at.is_(None))
+        shares = (
+            db.execute(statement.order_by(Share.updated_at.desc(), Share.id.desc()).offset(offset).limit(limit))
+            .scalars()
+            .all()
+        )
+        return ShareListResponse(
+            shares=[share_status_response(share, request, settings, encryption) for share in shares]
+        )
 
     @app.get("/v0/shares/{share_id}", response_model=ShareStatusResponse)
     def get_share_status(
@@ -452,9 +591,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         auth: AuthContext = Depends(require_auth),
         db: Session = Depends(get_db),
         settings: Settings = Depends(get_settings),
+        encryption: EncryptionService = Depends(get_encryption),
     ) -> ShareStatusResponse:
         share = get_share_by_id(db, share_id, auth.user_id)
-        return share_status_response(share, request, settings)
+        return share_status_response(share, request, settings, encryption)
 
     @app.get(
         "/v0/shares/{share_id}/events",
@@ -505,6 +645,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         auth: AuthContext = Depends(require_auth),
         db: Session = Depends(get_db),
         settings: Settings = Depends(get_settings),
+        encryption: EncryptionService = Depends(get_encryption),
     ) -> ShareLinksResponse:
         share = get_share_by_id(db, share_id, auth.user_id)
         links = (
@@ -515,7 +656,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return ShareLinksResponse(
             share_id=share.id,
             slug=share.slug,
-            links=[share_link_status_response(db, link, share, request, settings) for link in links],
+            links=[share_link_status_response(db, link, share, request, settings, encryption) for link in links],
         )
 
     @app.delete("/v0/shares/{share_id}", response_model=DeleteShareResponse)
@@ -553,7 +694,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return unavailable
         if share.password_hash and not verify_share_access(settings, share.id, request.cookies.get(access_cookie_name(slug))):
             record_access_event(db, request, settings, "password_required", 401, share=share)
-            return html(password_page(slug, share.title), 401)
+            return html(password_page(slug, share_title(encryption, share)), 401)
         try:
             markdown = share_markdown(db, storage, encryption, share)
             html_snapshot = share_html_snapshot(db, storage, encryption, share)
@@ -568,7 +709,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 500,
             )
         record_access_event(db, request, settings, "view", 200, share=share)
-        return html(document_page(share, markdown, html_snapshot), 200)
+        return html(
+            document_page(
+                share,
+                markdown,
+                html_snapshot,
+                title=share_title(encryption, share),
+                asset_refs=share_assets_payload(encryption, share),
+            ),
+            200,
+        )
 
     @app.get("/s/{slug}/link", response_class=HTMLResponse)
     def resolve_share_link(
@@ -577,6 +727,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         target: str = Query(..., min_length=1, max_length=1024),
         db: Session = Depends(get_db),
         settings: Settings = Depends(get_settings),
+        encryption: EncryptionService = Depends(get_encryption),
     ):
         share = db.execute(select(Share).where(Share.slug == slug)).scalar_one_or_none()
         if not share:
@@ -587,9 +738,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return unavailable
         if share.password_hash and not verify_share_access(settings, share.id, request.cookies.get(access_cookie_name(slug))):
             record_access_event(db, request, settings, "password_required", 401, share=share)
-            return html(password_page(slug, share.title), 401)
+            return html(password_page(slug, share_title(encryption, share)), 401)
 
-        target_share, status = resolve_internal_link_target(db, share, target)
+        target_share, status = resolve_internal_link_target(db, share, target, settings, encryption)
         if target_share:
             return RedirectResponse(share_url(target_share, request, settings), status_code=302)
         if status == "ambiguous":
@@ -659,10 +810,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         record_access_event(db, request, settings, "import", 200, share=share)
         return ShareImportPayloadResponse(
             slug=share.slug,
-            title=share.title,
+            title=share_title(encryption, share),
             markdown=markdown,
-            source_hash=share.source_hash,
-            assets=share_import_assets(db, share, request, settings),
+            source_hash=share_source_hash(encryption, share),
+            assets=share_import_assets(db, share, request, settings, encryption),
             updated_at=share.updated_at,
         )
 
@@ -714,6 +865,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         db: Session = Depends(get_db),
         settings: Settings = Depends(get_settings),
+        encryption: EncryptionService = Depends(get_encryption),
         form_password: str | None = Form(default=None, alias="password"),
     ):
         share = db.execute(select(Share).where(Share.slug == slug)).scalar_one_or_none()
@@ -748,7 +900,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         request.state.request_id,
                     ),
                 )
-            return html(password_page(slug, share.title, "Too many password attempts. Try again later."), 429)
+            return html(password_page(slug, share_title(encryption, share), "Too many password attempts. Try again later."), 429)
 
         if wants_json:
             try:
@@ -767,7 +919,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     status_code=401,
                     content=error_envelope("password_invalid", "Password is incorrect.", request.state.request_id),
                 )
-            return html(password_page(slug, share.title, "Password is incorrect."), 401)
+            return html(password_page(slug, share_title(encryption, share), "Password is incorrect."), 401)
 
         cookie_value = sign_share_access(settings, share.id)
         record_access_event(db, request, settings, "password_success", 200 if wants_json else 303, share=share)
@@ -805,7 +957,336 @@ def log_request(request: Request, status_code: int, started: float, error_type: 
     )
 
 
-def replace_share_assets(db: Session, share: Share, asset_refs: list) -> None:
+METADATA_TITLE_PLACEHOLDER = "Encrypted share"
+METADATA_PATH_PLACEHOLDER = ""
+METADATA_HASH_PREFIX = "encrypted:"
+METADATA_RAW_TARGET_PLACEHOLDER = "[encrypted]"
+METADATA_FILENAME_PLACEHOLDER = "asset"
+
+
+def canonical_hash_index_value(value: str) -> str:
+    return normalize_sha256(value).strip().lower()
+
+
+def text_index(settings: Settings, purpose: str, value: str | None, *, lowercase: bool = False) -> str | None:
+    if value is None:
+        return None
+    candidate = value.strip()
+    if lowercase:
+        candidate = candidate.lower()
+    return blind_index(settings, purpose, candidate)
+
+
+def doc_path_index_components(value: str | None) -> dict[str, str | None]:
+    if not value:
+        return {"full": None, "extless": None, "basename": None, "basename_extless": None}
+    normalized = normalize_share_path(value)
+    if not normalized:
+        return {"full": None, "extless": None, "basename": None, "basename_extless": None}
+    basename = normalized.rsplit("/", 1)[-1]
+    return {
+        "full": normalized.lower(),
+        "extless": normalized_path_without_known_extension(normalized).lower(),
+        "basename": basename.lower(),
+        "basename_extless": normalized_path_without_known_extension(basename).lower(),
+    }
+
+
+def doc_path_blind_indexes(settings: Settings, value: str | None) -> dict[str, str | None]:
+    return {
+        key: blind_index(settings, f"doc_path.{key}", component)
+        for key, component in doc_path_index_components(value).items()
+    }
+
+
+def assign_share_path_indexes(share: Share, settings: Settings, value: str | None) -> None:
+    indexes = doc_path_blind_indexes(settings, value)
+    share.source_path_full_index = indexes["full"]
+    share.source_path_extless_index = indexes["extless"]
+    share.source_path_basename_index = indexes["basename"]
+    share.source_path_basename_extless_index = indexes["basename_extless"]
+
+
+def assign_link_target_path_indexes(link: ShareLink, settings: Settings, value: str | None) -> None:
+    indexes = doc_path_blind_indexes(settings, value)
+    link.target_path_full_index = indexes["full"]
+    link.target_path_extless_index = indexes["extless"]
+    link.target_path_basename_index = indexes["basename"]
+    link.target_path_basename_extless_index = indexes["basename_extless"]
+
+
+def share_path_index_values(share: Share) -> set[str]:
+    return {
+        value
+        for value in (
+            share.source_path_full_index,
+            share.source_path_extless_index,
+            share.source_path_basename_index,
+            share.source_path_basename_extless_index,
+        )
+        if value
+    }
+
+
+def link_target_path_index_values(link: ShareLink) -> set[str]:
+    return {
+        value
+        for value in (
+            link.target_path_full_index,
+            link.target_path_extless_index,
+            link.target_path_basename_index,
+            link.target_path_basename_extless_index,
+        )
+        if value
+    }
+
+
+def link_target_path_indexes(link: ShareLink) -> dict[str, str | None]:
+    return {
+        "full": link.target_path_full_index,
+        "extless": link.target_path_extless_index,
+        "basename": link.target_path_basename_index,
+        "basename_extless": link.target_path_basename_extless_index,
+    }
+
+
+def source_path_index_score(share: Share, target_indexes: dict[str, str | None]) -> int:
+    if target_indexes.get("full") and share.source_path_full_index == target_indexes["full"]:
+        return 4
+    if target_indexes.get("extless") and share.source_path_extless_index == target_indexes["extless"]:
+        return 3
+    if target_indexes.get("basename") and share.source_path_basename_index == target_indexes["basename"]:
+        return 2
+    if (
+        target_indexes.get("basename_extless")
+        and share.source_path_basename_extless_index == target_indexes["basename_extless"]
+    ):
+        return 1
+    return 0
+
+
+def link_target_path_primary_index_values(link: ShareLink) -> set[str]:
+    return {value for value in (link.target_path_full_index, link.target_path_extless_index) if value}
+
+
+def link_target_path_basename_index_values(link: ShareLink) -> set[str]:
+    return {value for value in (link.target_path_basename_index, link.target_path_basename_extless_index) if value}
+
+
+def share_title(encryption: EncryptionService, share: Share) -> str:
+    return (
+        decrypt_metadata_text(encryption, "share", "title", share.id, share.title_enc, share.title, "")
+        or ""
+    )
+
+
+def share_vault_id(encryption: EncryptionService, share: Share) -> str | None:
+    return decrypt_metadata_text(encryption, "share", "vault_id", share.id, share.vault_id_enc, share.vault_id)
+
+
+def share_source_path(encryption: EncryptionService, share: Share) -> str:
+    return (
+        decrypt_metadata_text(
+            encryption,
+            "share",
+            "source_path",
+            share.id,
+            share.source_path_enc,
+            share.source_path,
+            "",
+        )
+        or ""
+    )
+
+
+def share_source_path_normalized(encryption: EncryptionService, share: Share) -> str | None:
+    return decrypt_metadata_text(
+        encryption,
+        "share",
+        "source_path_normalized",
+        share.id,
+        share.source_path_normalized_enc,
+        share.source_path_normalized,
+    )
+
+
+def share_doc_identity(encryption: EncryptionService, share: Share) -> str | None:
+    return decrypt_metadata_text(
+        encryption,
+        "share",
+        "doc_identity",
+        share.id,
+        share.doc_identity_enc,
+        share.doc_identity,
+    )
+
+
+def share_source_hash(encryption: EncryptionService, share: Share) -> str:
+    return (
+        decrypt_metadata_text(
+            encryption,
+            "share",
+            "source_hash",
+            share.id,
+            share.source_hash_enc,
+            share.source_hash,
+            "",
+        )
+        or ""
+    )
+
+
+def share_assets_payload(encryption: EncryptionService, share: Share) -> list[dict[str, str]]:
+    return decrypt_metadata_json(encryption, "share", "assets", share.id, share.assets_enc, share.assets, [])
+
+
+def share_client_payload(encryption: EncryptionService, share: Share) -> dict[str, str]:
+    return decrypt_metadata_json(encryption, "share", "client", share.id, share.client_enc, share.client, {})
+
+
+def asset_hash_value(encryption: EncryptionService, asset: Asset) -> str:
+    return (
+        decrypt_metadata_text(encryption, "asset", "hash", asset.id, asset.hash_enc, asset.hash, "")
+        or ""
+    )
+
+
+def asset_filename(encryption: EncryptionService, asset: Asset) -> str:
+    return (
+        decrypt_metadata_text(encryption, "asset", "filename", asset.id, asset.filename_enc, asset.filename, "")
+        or ""
+    )
+
+
+def share_asset_original_path(encryption: EncryptionService, link: ShareAsset) -> str | None:
+    return decrypt_metadata_text(
+        encryption,
+        "share_asset",
+        "original_path",
+        f"{link.share_id}:{link.asset_id}",
+        link.original_path_enc,
+        link.original_path,
+    )
+
+
+def link_raw_target(encryption: EncryptionService, link: ShareLink) -> str:
+    return (
+        decrypt_metadata_text(
+            encryption,
+            "share_link",
+            "raw_target",
+            link.id,
+            link.raw_target_enc,
+            link.raw_target,
+            "",
+        )
+        or ""
+    )
+
+
+def link_target_path(encryption: EncryptionService, link: ShareLink) -> str | None:
+    return decrypt_metadata_text(
+        encryption,
+        "share_link",
+        "target_path",
+        link.id,
+        link.target_path_enc,
+        link.target_path,
+    )
+
+
+def link_target_doc_identity(encryption: EncryptionService, link: ShareLink) -> str | None:
+    return decrypt_metadata_text(
+        encryption,
+        "share_link",
+        "target_doc_identity",
+        link.id,
+        link.target_doc_identity_enc,
+        link.target_doc_identity,
+    )
+
+
+def link_target_subpath(encryption: EncryptionService, link: ShareLink) -> str | None:
+    return decrypt_metadata_text(
+        encryption,
+        "share_link",
+        "target_subpath",
+        link.id,
+        link.target_subpath_enc,
+        link.target_subpath,
+    )
+
+
+def link_label(encryption: EncryptionService, link: ShareLink) -> str | None:
+    return decrypt_metadata_text(encryption, "share_link", "label", link.id, link.label_enc, link.label)
+
+
+def apply_share_metadata(
+    share: Share,
+    payload: SharePayload,
+    encryption: EncryptionService,
+    settings: Settings,
+) -> None:
+    title = resolved_payload_title(payload)
+    source_path_normalized = payload.source_path_normalized or normalize_share_path(payload.source_path)
+    asset_refs = [asset.model_dump(exclude_none=True) for asset in payload.assets]
+    client = payload.client.model_dump()
+
+    share.title_enc = encrypt_metadata_text(encryption, "share", "title", share.id, title)
+    share.title = METADATA_TITLE_PLACEHOLDER
+    share.vault_id_enc = encrypt_metadata_text(encryption, "share", "vault_id", share.id, payload.vault_id)
+    share.vault_id_index = text_index(settings, "vault_id", payload.vault_id)
+    share.vault_id = None
+    share.source_path_enc = encrypt_metadata_text(encryption, "share", "source_path", share.id, payload.source_path)
+    share.source_path = METADATA_PATH_PLACEHOLDER
+    share.source_path_normalized_enc = encrypt_metadata_text(
+        encryption, "share", "source_path_normalized", share.id, source_path_normalized
+    )
+    share.source_path_normalized = None
+    assign_share_path_indexes(share, settings, source_path_normalized)
+    share.doc_identity_enc = encrypt_metadata_text(encryption, "share", "doc_identity", share.id, payload.doc_identity)
+    share.doc_identity_index = text_index(settings, "doc_identity", payload.doc_identity)
+    share.doc_identity = None
+    share.source_hash_enc = encrypt_metadata_text(encryption, "share", "source_hash", share.id, payload.source_hash)
+    share.source_hash_index = text_index(settings, "share.source_hash", payload.source_hash, lowercase=True)
+    share.source_hash = f"{METADATA_HASH_PREFIX}{share.id}"
+    share.assets_enc = encrypt_metadata_json(encryption, "share", "assets", share.id, asset_refs)
+    share.assets = []
+    share.client_enc = encrypt_metadata_json(encryption, "share", "client", share.id, client)
+    share.client = {}
+
+
+def apply_asset_metadata(
+    asset: Asset,
+    encryption: EncryptionService,
+    settings: Settings,
+    content_hash: str,
+    filename: str,
+) -> None:
+    asset.hash_enc = encrypt_metadata_text(encryption, "asset", "hash", asset.id, content_hash)
+    asset.hash_index = blind_index(settings, "asset.hash", canonical_hash_index_value(content_hash))
+    asset.hash = f"{METADATA_HASH_PREFIX}{asset.id}"
+    asset.filename_enc = encrypt_metadata_text(encryption, "asset", "filename", asset.id, safe_asset_filename(filename))
+    asset.filename = METADATA_FILENAME_PLACEHOLDER
+
+
+def find_asset_by_hash(db: Session, owner_id: str, content_hash: str, settings: Settings) -> Asset | None:
+    hash_index = blind_index(settings, "asset.hash", canonical_hash_index_value(content_hash))
+    if hash_index:
+        existing = db.execute(
+            select(Asset).where(Asset.owner_id == owner_id, Asset.hash_index == hash_index)
+        ).scalar_one_or_none()
+        if existing:
+            return existing
+    return db.execute(select(Asset).where(Asset.owner_id == owner_id, Asset.hash == content_hash)).scalar_one_or_none()
+
+
+def replace_share_assets(
+    db: Session,
+    share: Share,
+    asset_refs: list,
+    encryption: EncryptionService,
+) -> None:
     db.execute(delete(ShareAsset).where(ShareAsset.share_id == share.id))
     seen: set[str] = set()
     linked_assets: dict[str, Asset] = {}
@@ -828,38 +1309,72 @@ def replace_share_assets(db: Session, share: Share, asset_refs: list) -> None:
                 share_id=share.id,
                 asset_id=asset.id,
                 role=asset_ref.role,
-                original_path=asset_ref.original_path,
+                original_path=None,
+                original_path_enc=encrypt_metadata_text(
+                    encryption,
+                    "share_asset",
+                    "original_path",
+                    f"{share.id}:{asset.id}",
+                    asset_ref.original_path,
+                ),
             )
         )
     validate_css_asset_reference(share, linked_assets, linked_roles)
 
 
-def replace_share_links(db: Session, share: Share, outbound_links: list) -> None:
+def replace_share_links(
+    db: Session,
+    share: Share,
+    outbound_links: list,
+    encryption: EncryptionService,
+    settings: Settings,
+) -> None:
     db.execute(delete(ShareLink).where(ShareLink.source_share_id == share.id))
     seen: set[tuple[str, str | None, str | None, str]] = set()
+    source_vault_id = share_vault_id(encryption, share)
     for outbound_link in outbound_links:
         validate_link_kind(outbound_link.link_kind)
         raw_target = outbound_link.raw_target.strip()
         target_path = normalize_share_path(outbound_link.target_path) if outbound_link.target_path else None
         target_doc_identity = outbound_link.target_doc_identity.strip() if outbound_link.target_doc_identity else None
+        target_subpath = outbound_link.target_subpath.strip() if outbound_link.target_subpath else None
+        label = outbound_link.label.strip() if outbound_link.label else None
         key = (normalize_obsidian_link_target(raw_target), target_path, target_doc_identity, outbound_link.link_kind)
         if key in seen:
             continue
         seen.add(key)
-        db.add(
-            ShareLink(
-                id=generate_prefixed_id("lnk"),
-                source_share_id=share.id,
-                owner_id=share.owner_id,
-                vault_id=share.vault_id,
-                raw_target=raw_target,
-                target_path=target_path,
-                target_doc_identity=target_doc_identity,
-                target_subpath=outbound_link.target_subpath.strip() if outbound_link.target_subpath else None,
-                label=outbound_link.label.strip() if outbound_link.label else None,
-                link_kind=outbound_link.link_kind,
-            )
+        link_id = generate_prefixed_id("lnk")
+        link = ShareLink(
+            id=link_id,
+            source_share_id=share.id,
+            owner_id=share.owner_id,
+            vault_id=None,
+            vault_id_enc=encrypt_metadata_text(encryption, "share_link", "vault_id", link_id, source_vault_id),
+            vault_id_index=text_index(settings, "vault_id", source_vault_id),
+            raw_target=METADATA_RAW_TARGET_PLACEHOLDER,
+            raw_target_enc=encrypt_metadata_text(encryption, "share_link", "raw_target", link_id, raw_target),
+            raw_target_index=blind_index(
+                settings,
+                "share_link.raw_target",
+                normalize_obsidian_link_target(raw_target),
+            ),
+            target_path=None,
+            target_path_enc=encrypt_metadata_text(encryption, "share_link", "target_path", link_id, target_path),
+            target_doc_identity=None,
+            target_doc_identity_enc=encrypt_metadata_text(
+                encryption, "share_link", "target_doc_identity", link_id, target_doc_identity
+            ),
+            target_doc_identity_index=text_index(settings, "doc_identity", target_doc_identity),
+            target_subpath=None,
+            target_subpath_enc=encrypt_metadata_text(
+                encryption, "share_link", "target_subpath", link_id, target_subpath
+            ),
+            label=None,
+            label_enc=encrypt_metadata_text(encryption, "share_link", "label", link_id, label),
+            link_kind=outbound_link.link_kind,
         )
+        assign_link_target_path_indexes(link, settings, target_path)
+        db.add(link)
 
 
 def collect_share_asset_ids(db: Session, share: Share) -> set[str]:
@@ -879,11 +1394,24 @@ def collect_share_asset_ids(db: Session, share: Share) -> set[str]:
 
 def clear_share_server_content(db: Session, share: Share) -> None:
     share.title = "Stopped share"
+    share.title_enc = None
     share.vault_id = None
+    share.vault_id_enc = None
+    share.vault_id_index = None
     share.source_path = ""
+    share.source_path_enc = None
     share.source_path_normalized = None
+    share.source_path_normalized_enc = None
+    share.source_path_full_index = None
+    share.source_path_extless_index = None
+    share.source_path_basename_index = None
+    share.source_path_basename_extless_index = None
     share.doc_identity = None
+    share.doc_identity_enc = None
+    share.doc_identity_index = None
     share.source_hash = "revoked"
+    share.source_hash_enc = None
+    share.source_hash_index = None
     share.markdown = None
     share.markdown_asset_id = None
     share.html_snapshot = None
@@ -891,7 +1419,9 @@ def clear_share_server_content(db: Session, share: Share) -> None:
     share.render_mode = "markdown_fallback"
     share.css_asset_id = None
     share.assets = []
+    share.assets_enc = None
     share.client = {}
+    share.client_enc = None
     share.password_hash = None
     db.execute(delete(ShareAsset).where(ShareAsset.share_id == share.id))
     db.execute(delete(ShareLink).where(ShareLink.source_share_id == share.id))
@@ -958,9 +1488,7 @@ def store_snapshot_text(
         return encryption.encrypt_text(value, inline_aad), None
 
     content_hash = f"sha256:{sha256(data).hexdigest()}"
-    existing = db.execute(
-        select(Asset).where(Asset.owner_id == owner_id, Asset.hash == content_hash)
-    ).scalar_one_or_none()
+    existing = find_asset_by_hash(db, owner_id, content_hash, settings)
     if existing:
         existing.last_used_at = utc_now()
         return None, existing.id
@@ -971,14 +1499,15 @@ def store_snapshot_text(
     asset = Asset(
         id=asset_id,
         owner_id=owner_id,
-        hash=content_hash,
-        filename=safe_asset_filename(filename),
+        hash=f"{METADATA_HASH_PREFIX}{asset_id}",
+        filename=METADATA_FILENAME_PLACEHOLDER,
         content_type=content_type,
         byte_length=len(data),
-        storage_key=storage.storage_key(owner_id, content_hash),
+        storage_key=storage.asset_storage_key(owner_id, asset_id),
         public_url=None,
         last_used_at=utc_now(),
     )
+    apply_asset_metadata(asset, encryption, settings, content_hash, filename)
     storage.put(asset.storage_key, encryption.encrypt_bytes(data, asset_bytes_aad(asset.id)))
     db.add(asset)
     db.flush()
@@ -1145,10 +1674,10 @@ def safe_asset_filename(value: str | None) -> str:
     return filename[:255]
 
 
-def asset_response(asset: Asset) -> AssetResponse:
+def asset_response(asset: Asset, encryption: EncryptionService) -> AssetResponse:
     return AssetResponse(
         asset_id=asset.id,
-        hash=asset.hash,
+        hash=asset_hash_value(encryption, asset),
         content_type=asset.content_type,
         byte_length=asset.byte_length,
         url=asset.public_url,
@@ -1156,7 +1685,11 @@ def asset_response(asset: Asset) -> AssetResponse:
 
 
 def share_import_assets(
-    db: Session, share: Share, request: Request, settings: Settings
+    db: Session,
+    share: Share,
+    request: Request,
+    settings: Settings,
+    encryption: EncryptionService,
 ) -> list[ShareImportPayloadResponse.AssetManifestItem]:
     rows = (
         db.execute(
@@ -1175,8 +1708,8 @@ def share_import_assets(
             ShareImportPayloadResponse.AssetManifestItem(
                 asset_id=asset.id,
                 role=link.role,
-                original_path=link.original_path,
-                filename=asset.filename,
+                original_path=share_asset_original_path(encryption, link),
+                filename=asset_filename(encryption, asset),
                 content_type=asset.content_type,
                 byte_length=asset.byte_length,
                 url=f"{share_url(share, request, settings)}/assets/{asset.id}",
@@ -1193,6 +1726,66 @@ def get_share_by_id(db: Session, share_id: str, owner_id: str | None = None) -> 
     if not share:
         raise ApiError(404, "share_not_found", "Share not found.")
     return share
+
+
+def is_valid_cloud_install_id(value: str) -> bool:
+    allowed = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    suffix = value[4:] if value.startswith("dfi_") else ""
+    return 32 <= len(value) <= 200 and len(suffix) >= 28 and all(char in allowed for char in suffix)
+
+
+def record_cloud_claim_event(
+    db: Session,
+    install_id_hash: str,
+    claim_ip_hash: str | None,
+    result: str,
+    payload: CloudClaimPayload,
+    now: datetime,
+) -> None:
+    db.add(
+        CloudClaimEvent(
+            id=generate_prefixed_id("evt"),
+            install_id_hash=install_id_hash,
+            ip_hash=claim_ip_hash,
+            result=result,
+            plugin_version=payload.plugin_version,
+            obsidian_version=payload.obsidian_version,
+            created_at=now,
+        )
+    )
+
+
+def is_cloud_claim_rate_limited(
+    db: Session,
+    settings: Settings,
+    install_id_hash: str,
+    claim_ip_hash: str | None,
+    now: datetime,
+) -> bool:
+    since = now - timedelta(hours=1)
+    if settings.cloud_claim_install_hour_limit > 0:
+        install_count = db.execute(
+            select(func.count())
+            .select_from(CloudClaimEvent)
+            .where(
+                CloudClaimEvent.install_id_hash == install_id_hash,
+                CloudClaimEvent.created_at >= since,
+            )
+        ).scalar_one()
+        if int(install_count) >= settings.cloud_claim_install_hour_limit:
+            return True
+    if claim_ip_hash and settings.cloud_claim_ip_hour_limit > 0:
+        ip_count = db.execute(
+            select(func.count())
+            .select_from(CloudClaimEvent)
+            .where(
+                CloudClaimEvent.ip_hash == claim_ip_hash,
+                CloudClaimEvent.created_at >= since,
+            )
+        ).scalar_one()
+        if int(ip_count) >= settings.cloud_claim_ip_hour_limit:
+            return True
+    return False
 
 
 def active_share_count(db: Session, owner_id: str) -> int:
@@ -1217,7 +1810,7 @@ def enforce_active_share_quota(db: Session, auth: AuthContext) -> None:
         raise ApiError(
             403,
             "share_quota_exceeded",
-            "You have reached the 10 active shares included with DocFerry Cloud.",
+            "You have reached the 5 active shares included with DocFerry Cloud.",
         )
 
 
@@ -1243,14 +1836,19 @@ def share_response(share: Share, request: Request, settings: Settings, include_c
     )
 
 
-def share_status_response(share: Share, request: Request, settings: Settings) -> ShareStatusResponse:
+def share_status_response(
+    share: Share,
+    request: Request,
+    settings: Settings,
+    encryption: EncryptionService,
+) -> ShareStatusResponse:
     return ShareStatusResponse(
         share_id=share.id,
         slug=share.slug,
         url=share_url(share, request, settings),
-        source_path=share.source_path,
-        source_hash=share.source_hash,
-        title=share.title,
+        source_path=share_source_path(encryption, share),
+        source_hash=share_source_hash(encryption, share),
+        title=share_title(encryption, share),
         status=share_status(share),
         password_enabled=share.password_hash is not None,
         expires_at=share.expires_at,
@@ -1262,8 +1860,6 @@ def share_status_response(share: Share, request: Request, settings: Settings) ->
 
 
 def resolved_payload_title(payload: SharePayload) -> str:
-    if payload.client.plugin_id == "fuyou-share" and payload.client.plugin_version == "0.0.1":
-        return title_from_source_path(payload.source_path)
     return payload.title
 
 
@@ -1274,14 +1870,31 @@ def title_from_source_path(source_path: str) -> str:
     return filename or source_path
 
 
-def resolve_internal_link_target(db: Session, source_share: Share, raw_target: str) -> tuple[Share | None, str]:
+def resolve_internal_link_target(
+    db: Session,
+    source_share: Share,
+    raw_target: str,
+    settings: Settings,
+    encryption: EncryptionService,
+) -> tuple[Share | None, str]:
     target = normalize_obsidian_link_target(raw_target)
     if not target or is_external_link_target(target):
         return None, "unsupported"
 
-    indexed_target = resolve_internal_link_target_from_index(db, source_share, target)
+    indexed_target = resolve_internal_link_target_from_index(db, source_share, target, settings, encryption)
     if indexed_target[1] != "no_index":
         return indexed_target
+
+    target_indexes = doc_path_blind_indexes(settings, target)
+    path_target = find_target_share_by_path_index_values(
+        db,
+        source_share,
+        target_indexes,
+        settings,
+        encryption,
+    )
+    if path_target[1] != "no_index":
+        return path_target
 
     target_full_keys = normalized_full_path_keys(target)
     target_basename_key = normalized_basename_key(target)
@@ -1299,7 +1912,11 @@ def resolve_internal_link_target(db: Session, source_share: Share, raw_target: s
     for candidate in candidates:
         if candidate.expires_at and coerce_aware(candidate.expires_at) <= utc_now():
             continue
-        score = internal_link_match_score(candidate.source_path, target_full_keys, target_basename_key)
+        score = internal_link_match_score(
+            share_source_path(encryption, candidate),
+            target_full_keys,
+            target_basename_key,
+        )
         if score:
             scored.append((score, candidate))
 
@@ -1309,13 +1926,19 @@ def resolve_internal_link_target(db: Session, source_share: Share, raw_target: s
     scored.sort(key=lambda item: item[0], reverse=True)
     best_score = scored[0][0]
     best_matches = [candidate for score, candidate in scored if score == best_score]
-    if best_score < 3 and len({normalized_path_without_known_extension(item.source_path) for item in best_matches}) > 1:
+    if best_score < 3 and len(
+        {normalized_path_without_known_extension(share_source_path(encryption, item)) for item in best_matches}
+    ) > 1:
         return None, "ambiguous"
     return best_matches[0], "ok"
 
 
 def resolve_internal_link_target_from_index(
-    db: Session, source_share: Share, normalized_target: str
+    db: Session,
+    source_share: Share,
+    normalized_target: str,
+    settings: Settings,
+    encryption: EncryptionService,
 ) -> tuple[Share | None, str]:
     links = (
         db.execute(select(ShareLink).where(ShareLink.source_share_id == source_share.id).order_by(ShareLink.created_at))
@@ -1325,14 +1948,26 @@ def resolve_internal_link_target_from_index(
     if not links:
         return None, "no_index"
 
-    matches = [link for link in links if normalize_obsidian_link_target(link.raw_target) == normalized_target]
+    target_index = blind_index(settings, "share_link.raw_target", normalized_target)
+    indexed_links = [link for link in links if link.raw_target_index]
+    if target_index and indexed_links:
+        matches = [link for link in indexed_links if link.raw_target_index == target_index]
+        if not matches:
+            return None, "not_published"
+    else:
+        matches = [
+            link
+            for link in links
+            if not link.raw_target_index
+            and normalize_obsidian_link_target(link_raw_target(encryption, link)) == normalized_target
+        ]
     if not matches:
-        return None, "not_published"
+        return None, "no_index" if not indexed_links else "not_published"
 
     resolved: list[Share] = []
     unresolved = False
     for link in matches:
-        target_share = find_indexed_target_share(db, source_share, link)
+        target_share = find_indexed_target_share(db, source_share, link, settings, encryption)
         if target_share:
             resolved.append(target_share)
         else:
@@ -1346,34 +1981,123 @@ def resolve_internal_link_target_from_index(
     return None, "not_published" if unresolved else "unsupported"
 
 
-def find_indexed_target_share(db: Session, source_share: Share, link: ShareLink) -> Share | None:
-    if link.target_doc_identity:
+def find_target_share_by_path_index_values(
+    db: Session,
+    source_share: Share,
+    target_indexes: dict[str, str | None],
+    settings: Settings,
+    encryption: EncryptionService,
+) -> tuple[Share | None, str]:
+    usable_indexes = {value for value in target_indexes.values() if value}
+    if not usable_indexes:
+        return None, "no_index"
+    source_vault_index = source_share.vault_id_index or text_index(
+        settings,
+        "vault_id",
+        share_vault_id(encryption, source_share),
+    )
+    statement = select(Share).where(Share.owner_id == source_share.owner_id, Share.stopped_at.is_(None))
+    if source_vault_index:
+        statement = statement.where(Share.vault_id_index == source_vault_index)
+    statement = statement.where(
+        or_(
+            Share.source_path_full_index.in_(usable_indexes),
+            Share.source_path_extless_index.in_(usable_indexes),
+            Share.source_path_basename_index.in_(usable_indexes),
+            Share.source_path_basename_extless_index.in_(usable_indexes),
+        )
+    )
+    candidates = [
+        candidate
+        for candidate in db.execute(statement.order_by(Share.last_published_at.desc(), Share.updated_at.desc()))
+        .scalars()
+        .all()
+        if not (candidate.expires_at and coerce_aware(candidate.expires_at) <= utc_now())
+    ]
+    scored = [(source_path_index_score(candidate, target_indexes), candidate) for candidate in candidates]
+    scored = [(score, candidate) for score, candidate in scored if score]
+    if scored:
+        best_score = max(score for score, _candidate in scored)
+        matches = [candidate for score, candidate in scored if score == best_score]
+    else:
+        matches = []
+    if len(matches) == 1:
+        return matches[0], "ok"
+    if len(matches) > 1:
+        return None, "ambiguous"
+
+    legacy_statement = select(Share.id).where(
+        Share.owner_id == source_share.owner_id,
+        Share.stopped_at.is_(None),
+        Share.source_path_full_index.is_(None),
+    )
+    if db.execute(legacy_statement.limit(1)).first():
+        return None, "no_index"
+    return None, "not_published"
+
+
+def find_indexed_target_share(
+    db: Session,
+    source_share: Share,
+    link: ShareLink,
+    settings: Settings,
+    encryption: EncryptionService,
+) -> Share | None:
+    source_vault_index = source_share.vault_id_index or text_index(
+        settings,
+        "vault_id",
+        share_vault_id(encryption, source_share),
+    )
+    if link.target_doc_identity_index:
         statement = select(Share).where(
             Share.owner_id == source_share.owner_id,
-            Share.doc_identity == link.target_doc_identity,
+            Share.doc_identity_index == link.target_doc_identity_index,
             Share.stopped_at.is_(None),
         )
-        if source_share.vault_id:
-            statement = statement.where(Share.vault_id == source_share.vault_id)
+        if source_vault_index:
+            statement = statement.where(Share.vault_id_index == source_vault_index)
         target = newest_active_share(db, statement)
         if target:
             return target
 
-    if link.target_path:
-        target_path = normalize_share_path(link.target_path)
-        target_keys = normalized_full_path_keys(target_path)
+    legacy_target_doc_identity = link_target_doc_identity(encryption, link)
+    legacy_source_vault_id = share_vault_id(encryption, source_share)
+    if legacy_target_doc_identity:
         statement = select(Share).where(
             Share.owner_id == source_share.owner_id,
+            Share.doc_identity == legacy_target_doc_identity,
             Share.stopped_at.is_(None),
         )
-        if source_share.vault_id:
-            statement = statement.where(Share.vault_id == source_share.vault_id)
+        if legacy_source_vault_id:
+            statement = statement.where(Share.vault_id == legacy_source_vault_id)
+        target = newest_active_share(db, statement)
+        if target:
+            return target
+
+    path_target, status = find_target_share_by_path_index_values(
+        db,
+        source_share,
+        link_target_path_indexes(link),
+        settings,
+        encryption,
+    )
+    if status == "ok":
+        return path_target
+    if status == "ambiguous":
+        return None
+
+    target_path = link_target_path(encryption, link)
+    if target_path:
+        target_keys = normalized_full_path_keys(normalize_share_path(target_path))
+        statement = select(Share).where(Share.owner_id == source_share.owner_id, Share.stopped_at.is_(None))
+        if legacy_source_vault_id:
+            statement = statement.where(Share.vault_id == legacy_source_vault_id)
         candidates = db.execute(statement.order_by(Share.last_published_at.desc(), Share.updated_at.desc())).scalars().all()
         matches = [
             candidate
             for candidate in candidates
             if not (candidate.expires_at and coerce_aware(candidate.expires_at) <= utc_now())
-            and source_path_keys(candidate).intersection(target_keys)
+            and source_path_keys(candidate, encryption).intersection(target_keys)
         ]
         if len(matches) == 1:
             return matches[0]
@@ -1391,29 +2115,41 @@ def newest_active_share(db: Session, statement):
     return None
 
 
-def source_path_keys(share: Share) -> set[str]:
-    if share.source_path_normalized:
-        keys = normalized_full_path_keys(share.source_path_normalized)
+def source_path_keys(share: Share, encryption: EncryptionService) -> set[str]:
+    normalized = share_source_path_normalized(encryption, share)
+    if normalized:
+        keys = normalized_full_path_keys(normalized)
     else:
         keys = set()
-    keys.update(normalized_full_path_keys(share.source_path))
+    source_path = share_source_path(encryption, share)
+    if source_path:
+        keys.update(normalized_full_path_keys(source_path))
     return keys
 
 
 def share_link_status_response(
-    db: Session, link: ShareLink, source_share: Share, request: Request, settings: Settings
+    db: Session,
+    link: ShareLink,
+    source_share: Share,
+    request: Request,
+    settings: Settings,
+    encryption: EncryptionService,
 ) -> ShareLinkStatusResponse:
     target_share, status = resolve_internal_link_target_from_index(
-        db, source_share, normalize_obsidian_link_target(link.raw_target)
+        db,
+        source_share,
+        normalize_obsidian_link_target(link_raw_target(encryption, link)),
+        settings,
+        encryption,
     )
     if status in {"no_index", "not_published"}:
         status = "unpublished"
     return ShareLinkStatusResponse(
         link_id=link.id,
-        raw_target=link.raw_target,
-        target_path=link.target_path,
-        target_subpath=link.target_subpath,
-        label=link.label,
+        raw_target=link_raw_target(encryption, link),
+        target_path=link_target_path(encryption, link),
+        target_subpath=link_target_subpath(encryption, link),
+        label=link_label(encryption, link),
         link_kind=link.link_kind,
         status="resolved" if target_share else status,  # type: ignore[arg-type]
         target_share_id=target_share.id if target_share else None,
@@ -1578,19 +2314,33 @@ def is_password_rate_limited(db: Session, request: Request, settings: Settings, 
 
 
 def ip_hash(request: Request, settings: Settings) -> str | None:
-    ip = forwarded_ip(request) or (request.client.host if request.client else None)
+    ip = request_ip(request, settings)
     if not ip:
         return None
     digest = sha256(f"{settings.cookie_secret}:{ip}".encode("utf-8")).hexdigest()
     return f"sha256:{digest}"
 
 
-def forwarded_ip(request: Request) -> str | None:
+def request_ip(request: Request, settings: Settings) -> str | None:
+    return forwarded_ip(request, settings) or (request.client.host if request.client else None)
+
+
+def forwarded_ip(request: Request, settings: Settings) -> str | None:
+    remote_host = request.client.host if request.client else None
+    if not remote_host or remote_host not in trusted_proxy_hosts(settings):
+        return None
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip and real_ip.strip():
+        return real_ip.strip()
     forwarded_for = request.headers.get("x-forwarded-for")
     if not forwarded_for:
         return None
-    first_ip = forwarded_for.split(",", 1)[0].strip()
-    return first_ip or None
+    forwarded_chain = [part.strip() for part in forwarded_for.split(",") if part.strip()]
+    return forwarded_chain[-1] if forwarded_chain else None
+
+
+def trusted_proxy_hosts(settings: Settings) -> set[str]:
+    return {host.strip() for host in settings.trusted_proxy_hosts.split(",") if host.strip()}
 
 
 app = create_app()

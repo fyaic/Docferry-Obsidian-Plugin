@@ -8,22 +8,24 @@ import sys
 from pathlib import Path
 
 from app.database import Base, make_engine, make_session_factory
-from app.models import SystemEvent  # noqa: F401
+from app.models import Asset, Share, ShareAsset, ShareLink, SystemEvent, User  # noqa: F401
 
 
 SERVER_ROOT = Path(__file__).resolve().parents[1]
 BACKUP_DOCFERRY_PATH = SERVER_ROOT / "scripts" / "backup_docferry.py"
 RESTORE_DRILL_PATH = SERVER_ROOT / "scripts" / "restore_drill.py"
 RUN_MAINTENANCE_PATH = SERVER_ROOT / "scripts" / "run_maintenance.py"
+TEST_MASTER_KEY_B64 = "eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg="
 
 
-def run_script(*args: str) -> subprocess.CompletedProcess[str]:
+def run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, *args],
         cwd=SERVER_ROOT,
         check=True,
         capture_output=True,
         text=True,
+        env={**os.environ, **(env or {})},
     )
 
 
@@ -129,6 +131,109 @@ def test_run_maintenance_records_system_event(tmp_path: Path) -> None:
     assert events[0].source == "docferry-maintenance"
     assert events[0].severity == "info"
     assert events[0].payload["event"] == "docferry_maintenance_succeeded"
+
+
+def test_metadata_backfill_encrypts_legacy_rows(tmp_path: Path) -> None:
+    database_url = f"sqlite:///{tmp_path / 'metadata.db'}"
+    engine = make_engine(database_url)
+    Base.metadata.create_all(bind=engine)
+    session_factory = make_session_factory(engine)
+    with session_factory() as session:
+        session.add(User(id="usr_legacy"))
+        session.add(
+            Asset(
+                id="asset_legacy",
+                owner_id="usr_legacy",
+                hash="sha256:legacy-asset-secret",
+                filename="legacy-secret.png",
+                content_type="image/png",
+                byte_length=16,
+                storage_key="assets/usr_legacy/le/legacy-asset-secret",
+            )
+        )
+        session.add(
+            Share(
+                id="sh_legacy",
+                owner_id="usr_legacy",
+                slug="legacy",
+                title="Legacy Secret Title",
+                vault_id="legacy-vault-secret",
+                source_path="Legacy/Secret Path.md",
+                source_path_normalized="Legacy/Secret Path.md",
+                doc_identity="legacy-doc-secret",
+                source_hash="sha256:legacy-source-secret",
+                markdown="# legacy",
+                render_mode="markdown_fallback",
+                assets=[{"asset_id": "asset_legacy", "original_path": "legacy-secret.png"}],
+                client={"plugin_version": "legacy-client-secret"},
+            )
+        )
+        session.add(
+            ShareAsset(
+                share_id="sh_legacy",
+                asset_id="asset_legacy",
+                role="image",
+                original_path="attachments/legacy-secret.png",
+            )
+        )
+        session.add(
+            ShareLink(
+                id="lnk_legacy",
+                source_share_id="sh_legacy",
+                owner_id="usr_legacy",
+                vault_id="legacy-vault-secret",
+                raw_target="Legacy Target Secret#Intro",
+                target_path="Legacy/Target Secret.md",
+                target_doc_identity="legacy-target-doc-secret",
+                target_subpath="Intro",
+                label="Legacy Label Secret",
+                link_kind="wiki",
+            )
+        )
+        session.commit()
+
+    completed = run_script(
+        "scripts/backfill_metadata_encryption.py",
+        "--database-url",
+        database_url,
+        "--apply",
+        env={
+            "DOCFERRY_MASTER_KEY_B64": TEST_MASTER_KEY_B64,
+            "DOCFERRY_BLIND_INDEX_SECRET": "test-blind-index-secret",
+        },
+    )
+    body = json.loads(completed.stdout)
+    assert body["apply"] is True
+    assert body["shares"] == 1
+    assert body["assets"] == 1
+    assert body["share_assets"] == 1
+    assert body["share_links"] == 1
+
+    with session_factory() as session:
+        share = session.get(Share, "sh_legacy")
+        asset = session.get(Asset, "asset_legacy")
+        share_asset = session.get(ShareAsset, ("sh_legacy", "asset_legacy"))
+        link = session.get(ShareLink, "lnk_legacy")
+
+        assert share.title == "Encrypted share"
+        assert share.title_enc and '"df_enc":1' in share.title_enc
+        assert share.source_path == ""
+        assert share.source_path_full_index
+        assert share.doc_identity is None
+        assert share.client == {}
+        assert asset.hash.startswith("encrypted:")
+        assert asset.hash_enc and '"df_enc":1' in asset.hash_enc
+        assert asset.hash_index
+        assert asset.filename == "asset"
+        assert asset.filename_enc and '"df_enc":1' in asset.filename_enc
+        assert share_asset.original_path is None
+        assert share_asset.original_path_enc and '"df_enc":1' in share_asset.original_path_enc
+        assert link.raw_target == "[encrypted]"
+        assert link.raw_target_enc and '"df_enc":1' in link.raw_target_enc
+        assert link.raw_target_index
+        assert link.target_path is None
+        assert link.target_path_full_index
+        assert link.label is None
 
 
 def test_backup_config_files_are_written_private(tmp_path: Path) -> None:

@@ -6,6 +6,7 @@ import type {
   DeleteShareResponse,
   SharePayload,
   ShareImportPayloadResponse,
+  ShareListResponse,
   ShareLinksResponse,
   ShareResponse,
   ShareStatusResponse
@@ -34,6 +35,12 @@ export interface AccountStatusResponse {
     active_share_limit: number;
     remaining_active_shares?: number | null;
   };
+}
+
+export interface CloudClaimResponse extends AccountStatusResponse {
+  token: string;
+  token_type: "bearer";
+  issued_at: string;
 }
 
 export class ShareApiError extends Error {
@@ -69,6 +76,10 @@ export class ShareApiClient {
     return this.getJson(`/v0/shares/${encodeURIComponent(shareId)}`);
   }
 
+  async listShares(): Promise<ShareListResponse> {
+    return this.getJson("/v0/shares");
+  }
+
   async getShareLinks(shareId: string): Promise<ShareLinksResponse> {
     return this.getJson(`/v0/shares/${encodeURIComponent(shareId)}/links`);
   }
@@ -99,6 +110,19 @@ export class ShareApiClient {
 
   async getAccount(): Promise<AccountStatusResponse> {
     return this.getJson("/v0/account");
+  }
+
+  async claimCloudToken(installId: string, obsidianVersion: string): Promise<CloudClaimResponse> {
+    return this.postJson("/v0/cloud/claim", {
+      install_id: installId,
+      claim_version: 1,
+      plugin_id: "docferry",
+      plugin_version: this.pluginVersion,
+      obsidian_version: obsidianVersion,
+      client: {
+        platform: "desktop"
+      }
+    });
   }
 
   private async uploadAssetViaApi(

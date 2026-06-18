@@ -47,7 +47,7 @@ class SmokeClient:
         auth: bool = False,
     ) -> SmokeResponse:
         data = None
-        headers: dict[str, str] = {"User-Agent": "DocferrySmoke/0.0.1"}
+        headers: dict[str, str] = {"User-Agent": "DocferrySmoke/0.0.6"}
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
@@ -107,7 +107,7 @@ def assert_error_code(response: SmokeResponse, expected_status: int, expected_co
 
 def run_quota_smoke(client: SmokeClient) -> None:
     quota_shares: list[dict[str, object]] = []
-    for index in range(10):
+    for index in range(5):
         created = client.post(
             "/v0/shares",
             body=payload(
@@ -131,7 +131,7 @@ def run_quota_smoke(client: SmokeClient) -> None:
         ),
         auth=True,
     )
-    assert_error_code(blocked, 403, "share_quota_exceeded", "quota create 11")
+    assert_error_code(blocked, 403, "share_quota_exceeded", "quota create 6")
 
     first = quota_shares.pop(0)
     deleted = client.delete(f"/v0/shares/{first['share_id']}", auth=True)
@@ -159,7 +159,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run a live Docferry API smoke test.")
     parser.add_argument("--base-url", default="http://127.0.0.1:8787")
     parser.add_argument("--token", default="dev-token")
-    parser.add_argument("--skip-quota", action="store_true", help="Skip the 10-share quota lifecycle check.")
+    parser.add_argument("--skip-quota", action="store_true", help="Skip the 5-share quota lifecycle check.")
     args = parser.parse_args()
 
     client = SmokeClient(args.base_url.rstrip("/"), args.token)

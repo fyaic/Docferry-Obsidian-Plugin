@@ -6,6 +6,11 @@
 - Use `activeDocument` instead of `document` for hidden preview rendering and theme CSS capture.
 - Tighten TypeScript catch-variable typing with `useUnknownInCatchVariables`; remove unused `_error` bindings.
 - Add `as unknown` casts around `JSON.parse` for strict ESLint rules.
+- Remove redundant type assertions (`as string`, `as HTMLElement`).
+- Use a dedicated short-lived `Component` for `MarkdownRenderer.render` instead of the plugin instance.
+- Bind translator callbacks passed to `ConfirmModal` to avoid unbound-method warnings.
+- Remove unnecessary `async` from event handlers and keep `Setting` callbacks in block bodies.
+- Raise `minAppVersion` to `1.13.0` to match the `Plugin.settings` and deprecated `SettingTab` APIs used in the settings UI.
 - Keep GitHub release notes and artifact attestations for release assets.
 
 ## 0.0.7
@@ -28,4 +33,4 @@
 - Add a plugin settings share management area for account-level DocFerry shares, with local vault records merged when available.
 - Add Cloud account status support through `GET /v0/account`.
 - Add server-side encrypted-at-rest storage for note body fields and object bytes.
-- Update privacy copy for encrypted-at-rest storage and DocFerry Cloud server rendering boundaries.
+- Update privacy copy for encrypted-at-rest storage and Docferry Cloud server rendering boundaries.

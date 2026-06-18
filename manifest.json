@@ -2,7 +2,7 @@
   "id": "docferry",
   "name": "DocFerry",
   "version": "0.0.8",
-  "minAppVersion": "1.4.0",
+  "minAppVersion": "1.13.0",
   "description": "Publish one note to a secure DocFerry share link.",
   "author": "Bondie Labs",
   "authorUrl": "https://bondie.io/research/docferry",

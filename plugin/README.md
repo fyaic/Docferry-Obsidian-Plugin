@@ -21,7 +21,7 @@ Public plugin identity:
 - Update, copy, and stop the current note's share link.
 - Import one DocFerry share URL into the current vault.
 - Show linked-note status for the current published note.
-- List account shares from the selected service in plugin settings, with local vault records merged when available.
+- List account shares from the selected service in plugin settings, resolving local notes by server-provided source path without enumerating every vault file.
 - Write `df_*` frontmatter fields used to update, copy, or stop a share later.
 - Upload explicitly referenced local images and attachments through the configured DocFerry server.
 - Capture a bounded Obsidian HTML and CSS reading-view snapshot.

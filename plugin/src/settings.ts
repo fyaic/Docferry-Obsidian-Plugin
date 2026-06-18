@@ -110,11 +110,6 @@ export interface SettingsHost {
   refreshLocalizedCommands?(): void;
 }
 
-interface LocalManagedShare {
-  file: TFile;
-  meta: ShareMeta;
-}
-
 interface ManagedShare {
   shareId?: string;
   file?: TFile;
@@ -329,7 +324,6 @@ export class DocferrySettingTab extends PluginSettingTab {
     sectionEl.empty();
     this.renderShareManagementLoading(sectionEl);
 
-    const localShares = this.collectLocalShares();
     let serverShares: ShareStatusResponse[] = [];
     let listError: string | undefined;
     try {
@@ -338,16 +332,16 @@ export class DocferrySettingTab extends PluginSettingTab {
       for (const share of serverShares) {
         this.shareStatusCache.set(share.share_id, { status: share });
       }
-    } catch (error) {
+    } catch (error: unknown) {
       listError = this.errorMessage(error);
     }
 
-    const shares = this.mergeManagedShares(localShares, serverShares, !listError);
+    const shares = this.mergeManagedShares(serverShares);
     sectionEl.empty();
 
     const headerEl = sectionEl.createDiv({ cls: "docferry-share-management-header" });
     const copyEl = headerEl.createDiv({ cls: "docferry-share-management-copy" });
-    copyEl.createEl("h3", { text: this.t("shares.title") });
+    new Setting(copyEl).setName(this.t("shares.title")).setHeading();
     const shareWord = shares.length === 1 ? this.t("shares.shareSingular") : this.t("shares.sharePlural");
     copyEl.createEl("p", {
       text: this.t("shares.accountCount", { count: shares.length, shareWord }),
@@ -383,60 +377,26 @@ export class DocferrySettingTab extends PluginSettingTab {
   private renderShareManagementLoading(sectionEl: HTMLElement): void {
     const headerEl = sectionEl.createDiv({ cls: "docferry-share-management-header" });
     const copyEl = headerEl.createDiv({ cls: "docferry-share-management-copy" });
-    copyEl.createEl("h3", { text: this.t("shares.title") });
+    new Setting(copyEl).setName(this.t("shares.title")).setHeading();
     copyEl.createEl("p", {
       text: this.t("shares.loading"),
       cls: "setting-item-description"
     });
   }
 
-  private collectLocalShares(): LocalManagedShare[] {
-    return this.app.vault
-      .getMarkdownFiles()
-      .map((file) => ({ file, meta: readShareMeta(this.app, file) }))
-      .filter((share) => Boolean(share.meta.id || share.meta.url))
-      .sort((left, right) => {
-        const byUpdated = timestamp(right.meta.updated) - timestamp(left.meta.updated);
-        return byUpdated || left.file.path.localeCompare(right.file.path);
-      });
-  }
-
-  private mergeManagedShares(
-    localShares: LocalManagedShare[],
-    serverShares: ShareStatusResponse[],
-    serverLoaded: boolean
-  ): ManagedShare[] {
-    const localById = new Map<string, LocalManagedShare>();
-    for (const share of localShares) {
-      if (share.meta.id) localById.set(share.meta.id, share);
-    }
-
-    const usedLocalFiles = new Set<string>();
+  private mergeManagedShares(serverShares: ShareStatusResponse[]): ManagedShare[] {
     const merged: ManagedShare[] = serverShares.map((status) => {
-      const local = localById.get(status.share_id);
-      if (local) usedLocalFiles.add(local.file.path);
+      const file = this.resolveMarkdownFile(status.source_path);
+      const meta = file ? readShareMeta(this.app, file) : undefined;
       return {
         shareId: status.share_id,
-        file: local?.file,
-        meta: local?.meta,
+        file,
+        meta,
         status,
-        localTracked: Boolean(local),
+        localTracked: Boolean(meta?.id === status.share_id || meta?.url === status.url),
         missingFromServer: false
       };
     });
-
-    for (const local of localShares) {
-      if (usedLocalFiles.has(local.file.path)) continue;
-      const cached = local.meta.id ? this.shareStatusCache.get(local.meta.id)?.status : undefined;
-      merged.push({
-        shareId: local.meta.id,
-        file: local.file,
-        meta: local.meta,
-        status: cached,
-        localTracked: true,
-        missingFromServer: serverLoaded && Boolean(local.meta.id)
-      });
-    }
 
     return merged.sort((left, right) => {
       const byUpdated = timestamp(right.status?.updated_at || right.meta?.updated) - timestamp(left.status?.updated_at || left.meta?.updated);
@@ -444,6 +404,12 @@ export class DocferrySettingTab extends PluginSettingTab {
       const rightLabel = right.status?.source_path || right.file?.path || right.shareId || "";
       return byUpdated || leftLabel.localeCompare(rightLabel);
     });
+  }
+
+  private resolveMarkdownFile(path: string | null | undefined): TFile | undefined {
+    if (!path) return undefined;
+    const file = this.app.vault.getAbstractFileByPath(path);
+    return file instanceof TFile && file.extension === "md" ? file : undefined;
   }
 
   private renderShareRow(listEl: HTMLElement, sectionEl: HTMLElement, share: ManagedShare): void {
@@ -543,7 +509,7 @@ export class DocferrySettingTab extends PluginSettingTab {
     try {
       const status = await this.host.refreshShareStatus(shareId);
       this.shareStatusCache.set(shareId, { status });
-    } catch (error) {
+    } catch (error: unknown) {
       this.shareStatusCache.set(shareId, { error: this.errorMessage(error) });
     }
   }

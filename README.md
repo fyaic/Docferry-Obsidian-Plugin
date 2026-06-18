@@ -69,14 +69,14 @@ You can self-host the server from this repository. If you use a server operated 
 - `Advanced token fallback`: Lets support or migration users paste a Cloud token manually without making that the normal path.
 - `Server token`: A token for your custom self-hosted server.
 - `Server URL`: Shown only in custom mode.
-- `Share management`: Lists account shares from the selected service, merges local vault records when available, and lets you open notes, copy links, refresh status, stop sharing, or remove stale local records.
+- `Share management`: Lists account shares from the selected service, resolves local notes only by each share's server-provided source path, and lets you open notes, copy links, refresh status, stop sharing, or remove stale local records when a matching local note is found.
 - `Password by default`: Preselects password protection in the publish dialog.
 - `Default expiration`: Sets the initial expiration option in the publish dialog.
 - `Debug logging`: Writes limited publish diagnostics to the developer console when enabled.
 
 ## Privacy
 
-Read [PRIVACY.md](PRIVACY.md) before publishing sensitive notes. The plugin also links to the public privacy notice from the settings tab, directly under `Service mode`. In short: Cloud connection sends a random local install ID so the service can issue a free token and apply abuse limits. Publishing sends only the note and explicitly referenced assets you choose to publish, and only to the selected DocFerry service. DocFerry Cloud stores note body, object bytes, and sensitive metadata encrypted at rest, with blind indexes for matching fields; the server decrypts data to render share pages and import payloads. Stop sharing revokes the public URL and removes that share's server-side content and non-reused object bytes. Bondie Labs does not receive your vault data when you self-host.
+Read [PRIVACY.md](PRIVACY.md) before publishing sensitive notes. The plugin also links to the public privacy notice from the settings tab, directly under `Service mode`. In short: Cloud connection sends a random local install ID so the service can issue a free token and apply abuse limits. Publishing sends only the note and explicitly referenced assets you choose to publish, and only to the selected DocFerry service. Share management uses the account share list and direct source-path lookup rather than enumerating every vault file. Copy actions write DocFerry share URLs to the system clipboard. DocFerry Cloud stores note body, object bytes, and sensitive metadata encrypted at rest, with blind indexes for matching fields; the server decrypts data to render share pages and import payloads. Stop sharing revokes the public URL and removes that share's server-side content and non-reused object bytes. Bondie Labs does not receive your vault data when you self-host.
 
 ## Development
 

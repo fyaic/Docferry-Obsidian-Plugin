@@ -91,7 +91,7 @@ export class ShareApiClient {
   async validateAuthToken(): Promise<void> {
     try {
       await this.getJson("/v0/shares/sh_token_probe");
-    } catch (error) {
+    } catch (error: unknown) {
       if (error instanceof ShareApiError && error.status === 404 && error.code === "share_not_found") {
         return;
       }
@@ -274,9 +274,9 @@ export class ShareApiClient {
 
     if (status >= 200 && status < 300) return parsed as T;
 
-    const envelope = parsed as ErrorEnvelope | undefined;
-    const message = envelope?.error?.message || text || `Request failed with ${status}`;
-    throw new ShareApiError(message, status, envelope?.error?.code, envelope?.error?.request_id);
+    const error = readErrorEnvelope(parsed);
+    const message = error?.message || text || `Request failed with ${status}`;
+    throw new ShareApiError(message, status, error?.code, error?.request_id);
   }
 }
 
@@ -306,4 +306,23 @@ function cookieHeaderFrom(headers: Record<string, string>): string | undefined {
   if (!value) return undefined;
   const firstCookie = value.split(",", 1)[0]?.split(";", 1)[0]?.trim();
   return firstCookie || undefined;
+}
+
+function readErrorEnvelope(value: unknown): ErrorEnvelope["error"] | undefined {
+  if (!isRecord(value)) return undefined;
+  const error = value.error;
+  if (!isRecord(error)) return undefined;
+  return {
+    code: readOptionalString(error.code),
+    message: readOptionalString(error.message),
+    request_id: readOptionalString(error.request_id)
+  };
+}
+
+function readOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

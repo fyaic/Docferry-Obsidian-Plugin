@@ -63,6 +63,8 @@ The plugin stores settings in this vault's local Obsidian plugin data, including
 
 The plugin also writes share metadata to the published note's frontmatter so the note can be updated, copied, or stopped later.
 
+Share management requests the account share list from the selected DocFerry service. To open or clean up a local note, it looks up the server-provided source path directly in the current vault; it does not enumerate every vault file to discover shares. Copy buttons and successful publish/import flows may write DocFerry share URLs to the system clipboard, but the plugin does not read clipboard contents.
+
 ## Server Storage And Encryption
 
 DocFerry Cloud stores note body fields, object bytes, and sensitive share metadata using server-side encrypted-at-rest storage. New and updated shares encrypt `Share.markdown`, `Share.html_snapshot`, stored asset/object bytes, share title, source path, vault identifier, document identity, source hash, client metadata, asset filenames, asset original paths, asset hashes, and internal-link labels/targets with AES-GCM envelopes. The DocFerry server decrypts this data to render share pages, serve assets, verify imports, return import payloads, and show link status.

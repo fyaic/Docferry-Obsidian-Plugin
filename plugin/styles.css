@@ -34,8 +34,9 @@
   text-align: left;
 }
 
-.docferry-plugin-header-copy h2 {
+.docferry-plugin-title {
   font-size: 1.35rem;
+  font-weight: var(--font-semibold);
   letter-spacing: 0;
   line-height: 1.2;
   margin: 0;
@@ -48,6 +49,15 @@
   margin: 4px 0 0;
   text-align: left;
   width: 100%;
+}
+
+.docferry-snapshot-source {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 860px;
+  pointer-events: none;
+  visibility: hidden;
 }
 
 .docferry-language-toggle {

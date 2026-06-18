@@ -238,7 +238,7 @@ export default class DocferryPlugin extends Plugin {
       notice.hide();
       new Notice(this.t("notice.connectedCloud", { quota }));
       return true;
-    } catch (error) {
+    } catch (error: unknown) {
       notice.hide();
       new Notice(this.formatCloudConnectionError(error));
       return false;
@@ -290,7 +290,7 @@ export default class DocferryPlugin extends Plugin {
             quota: account.account.active_shares
           })
         );
-      } catch (error) {
+      } catch (error: unknown) {
         if (error instanceof ShareApiError && error.status === 404) {
           await this.api.validateAuthToken();
           new Notice(this.t("notice.connectedServerTokenValid", { service: health.service, version: health.version }));
@@ -298,7 +298,7 @@ export default class DocferryPlugin extends Plugin {
         }
         throw error;
       }
-    } catch (error) {
+    } catch (error: unknown) {
       if (error instanceof ShareApiError && error.status === 401) {
         const credentialName =
           this.settings.serviceMode === "cloud" ? this.t("notice.credentialCloud") : this.t("notice.credentialServer");
@@ -323,7 +323,7 @@ export default class DocferryPlugin extends Plugin {
       if (file) await clearShareMeta(this.app, file);
       new Notice(this.t("notice.sharingStopped"));
       return true;
-    } catch (error) {
+    } catch (error: unknown) {
       new Notice(this.formatError(error, this.t("notice.stopSharingFailed")));
       return false;
     }
@@ -392,7 +392,7 @@ export default class DocferryPlugin extends Plugin {
       new Notice(this.t("notice.shareLinkCopied"));
       new ResultModal(this.app, options.title, response.url, response.updated_at, makeTranslator(this.settings.language)).open();
       this.debug("publish response", response);
-    } catch (error) {
+    } catch (error: unknown) {
       notice.hide();
       new Notice(this.formatError(error, this.t("notice.publishFailed")));
       this.debug("publish error", error);
@@ -416,7 +416,7 @@ export default class DocferryPlugin extends Plugin {
   ): Promise<ShareResponse> {
     try {
       return await this.api.updateShare(shareId, payload);
-    } catch (error) {
+    } catch (error: unknown) {
       if (!(error instanceof ShareApiError) || error.status !== 404 || error.code !== "share_not_found") {
         throw error;
       }
@@ -446,7 +446,7 @@ export default class DocferryPlugin extends Plugin {
     try {
       const response = await this.api.getShareLinks(meta.id);
       new LinkStatusModal(this.app, file.basename, response, makeTranslator(this.settings.language)).open();
-    } catch (error) {
+    } catch (error: unknown) {
       new Notice(this.formatError(error, this.t("notice.linkStatusFailed")));
     }
   }
@@ -476,7 +476,7 @@ export default class DocferryPlugin extends Plugin {
       if (file instanceof TFile) {
         await this.app.workspace.getLeaf(true).openFile(file);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       notice.hide();
       new Notice(this.formatError(error, this.t("notice.importFailed")));
     }
@@ -566,7 +566,7 @@ export default class DocferryPlugin extends Plugin {
       report?.(this.t("progress.uploadingStyle"));
       try {
         cssAsset = await this.uploadCssSnapshot(snapshot.css);
-      } catch (error) {
+      } catch (error: unknown) {
         this.debug("css snapshot upload failed", error);
       }
     }
@@ -626,12 +626,6 @@ export default class DocferryPlugin extends Plugin {
   ): Promise<HtmlSnapshotResult | null> {
     const container = document.createElement("div");
     container.className = "markdown-preview-view markdown-rendered docferry-snapshot-source";
-    container.style.position = "fixed";
-    container.style.left = "-10000px";
-    container.style.top = "0";
-    container.style.width = "860px";
-    container.style.pointerEvents = "none";
-    container.style.visibility = "hidden";
     document.body.appendChild(container);
 
     try {
@@ -645,7 +639,7 @@ export default class DocferryPlugin extends Plugin {
         html: container.innerHTML,
         css
       };
-    } catch (error) {
+    } catch (error: unknown) {
       this.debug("html snapshot failed", error);
       return null;
     } finally {
@@ -744,7 +738,7 @@ export default class DocferryPlugin extends Plugin {
         return { data: buffer, filename: target.name, contentType, qualityMode: "original" };
       }
       return { data: optimized, filename: target.name, contentType, qualityMode };
-    } catch (error) {
+    } catch (error: unknown) {
       this.debug("image optimization failed; uploading original", { path: target.path, error });
       return { data: buffer, filename: target.name, contentType, qualityMode: "original" };
     }
@@ -966,8 +960,13 @@ function hashBufferToHex(hashBuffer: ArrayBuffer): string {
 }
 
 function getObsidianVersion(app: unknown): string {
-  const maybeApp = app as { version?: unknown };
-  return typeof maybeApp.version === "string" ? maybeApp.version : "unknown";
+  if (!isObjectRecord(app)) return "unknown";
+  const version = app.version;
+  return typeof version === "string" ? version : "unknown";
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function isValidAnonymousInstallId(value: string): boolean {

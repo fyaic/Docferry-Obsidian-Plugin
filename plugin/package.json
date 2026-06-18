@@ -1,6 +1,6 @@
 {
   "name": "docferry",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "Publish one note to a secure DocFerry share link.",
   "homepage": "https://bondie.io/research/docferry",
   "main": "main.js",

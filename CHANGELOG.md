@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.7
+
+- Add GitHub release notes and artifact attestations for release assets.
+- Address Obsidian automated review errors for static style assignment and settings headings.
+- Avoid vault-wide enumeration in share management by using the account share list and direct source-path lookup.
+- Tighten TypeScript error handling around API errors and caught exceptions.
+
 ## 0.0.6
 
 - Standardize the free and open-source Obsidian plugin identity as DocFerry by Bondie Labs.

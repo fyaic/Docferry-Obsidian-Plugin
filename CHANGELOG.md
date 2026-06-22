@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.10
+
+- Restore the default DocFerry Cloud endpoint to `https://docferry.fuyonder.tech` while the Bondie subdomain DNS/TLS rollout remains unresolved.
+- Keep the plugin release version aligned across root manifest, plugin manifest, npm package metadata, lockfile, `versions.json`, CHANGELOG, and release notes.
+
 ## 0.0.9
 
 - Remove disallowed `eslint-disable-next-line obsidianmd/ui/sentence-case` comments.

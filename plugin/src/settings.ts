@@ -17,7 +17,7 @@ import type { ShareListResponse, ShareMeta, ShareStatus, ShareStatusResponse } f
 export type ImageUploadQuality = "original" | "high" | "standard";
 export type DocferryServiceMode = "cloud" | "custom";
 
-export const DOCFERRY_CLOUD_BASE_URL = "https://docferry.bondie.io";
+export const DOCFERRY_CLOUD_BASE_URL = "https://docferry.fuyonder.tech";
 export const DOCFERRY_CLOUD_HELP_URL = "https://bondie.io/research/docferry#cloud-token";
 export const DOCFERRY_PRIVACY_URL = "https://github.com/fyaic/Docferry-Obsidian-Plugin/blob/main/PRIVACY.md";
 

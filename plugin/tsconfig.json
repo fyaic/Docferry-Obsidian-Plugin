@@ -1,5 +1,9 @@
 {
   "compilerOptions": {
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "inlineSourceMap": true,
     "inlineSources": true,

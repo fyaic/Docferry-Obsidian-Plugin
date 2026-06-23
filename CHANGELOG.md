@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.11
+
+- Enable full TypeScript `strict` mode (plus `skipLibCheck`, `esModuleInterop`, and `forceConsistentCasingInFileNames`) so the project type-checks under the strictest settings; `tsc -noEmit` and ESLint both pass with zero problems.
+- Respond to the automated review round on 0.0.10: the `@typescript-eslint/no-unsafe-*` warnings are resolved-as-`any` false positives that appear when the reviewer's type-aware lint cannot resolve the Obsidian type declarations; the source already lints clean against the bundled `typescript-eslint` and `eslint-plugin-obsidianmd` rules.
+- Confirm clipboard access remains write-only and triggered only by explicit user actions (already documented in `PRIVACY.md`).
+
 ## 0.0.10
 
 - Restore the default DocFerry Cloud endpoint to `https://docferry.fuyonder.tech` while the Bondie subdomain DNS/TLS rollout remains unresolved.

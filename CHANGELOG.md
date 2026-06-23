@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.12
+
+- Add repository-root `package.json`, `package-lock.json`, `tsconfig.json`, and `eslint.config.mjs` so the automated review environment can install and resolve the `obsidian` type declarations from the repo root, even though the plugin source lives under `plugin/`. This clears the spurious `@typescript-eslint/no-unsafe-*` warnings that appeared only because the audit could not resolve Obsidian's types (the plugin source already lints clean locally). No plugin behavior changes; `main.js` is unchanged in content.
+- Pin `obsidian` (1.13.0) and its `@codemirror/state` (6.5.0) / `@codemirror/view` (6.38.6) peers to exact versions at the root so a clean `npm install` resolves without peer-dependency conflicts.
+
 ## 0.0.11
 
 - Enable full TypeScript `strict` mode (plus `skipLibCheck`, `esModuleInterop`, and `forceConsistentCasingInFileNames`) so the project type-checks under the strictest settings; `tsc -noEmit` and ESLint both pass with zero problems.

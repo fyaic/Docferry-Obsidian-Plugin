@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.13
+
+- Replace the `builtin-modules` dependency with Node's built-in `module.builtinModules` in the esbuild config, and remove the package from both the plugin and root `package.json`. Addresses the automated review suggestion to avoid `builtin-modules`. No plugin behavior changes.
+
 ## 0.0.12
 
 - Add repository-root `package.json`, `package-lock.json`, `tsconfig.json`, and `eslint.config.mjs` so the automated review environment can install and resolve the `obsidian` type declarations from the repo root, even though the plugin source lives under `plugin/`. This clears the spurious `@typescript-eslint/no-unsafe-*` warnings that appeared only because the audit could not resolve Obsidian's types (the plugin source already lints clean locally). No plugin behavior changes; `main.js` is unchanged in content.

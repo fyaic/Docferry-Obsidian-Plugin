@@ -1,4 +1,5 @@
 import { requestUrl } from "obsidian";
+import COS from "cos-js-sdk-v5";
 import type {
   AccessRequestResponse,
   AssetResponse,
@@ -17,8 +18,6 @@ import type {
   ShareStatusResponse
 } from "./types";
 import type { DocferrySettings } from "./settings";
-
-const COS = require("cos-js-sdk-v5") as typeof import("cos-js-sdk-v5");
 
 interface ErrorEnvelope {
   error?: {

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.16
+
+- Prepare the June 30 public free launch plugin for stricter Obsidian review.
+- Remove non-plugin server, CLI, importer, and legacy release-note content from the public plugin repository.
+- Replace raw heading elements and inline hidden-render styles with review-friendly CSS classes.
+- Restore root ESLint/type-resolution metadata so automated review can resolve Obsidian types from the repository root.
+
 ## 0.0.15
 
 - Replace the previously published legacy community build with the June 30 public free launch plugin.

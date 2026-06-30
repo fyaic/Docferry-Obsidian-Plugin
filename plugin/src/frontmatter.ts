@@ -26,7 +26,7 @@ export async function writeShareMeta(
   response: ShareResponse,
   options: { passwordEnabled: boolean; expiresAt?: string | null }
 ): Promise<void> {
-  await app.fileManager.processFrontMatter(file, (frontmatter) => {
+  await app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
     frontmatter[FIELD_ID] = response.share_id;
     frontmatter[FIELD_URL] = response.url;
     frontmatter[FIELD_UPDATED] = response.updated_at;
@@ -36,7 +36,7 @@ export async function writeShareMeta(
 }
 
 export async function clearShareMeta(app: App, file: TFile): Promise<void> {
-  await app.fileManager.processFrontMatter(file, (frontmatter) => {
+  await app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
     delete frontmatter[FIELD_ID];
     delete frontmatter[FIELD_URL];
     delete frontmatter[FIELD_UPDATED];

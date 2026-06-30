@@ -22,7 +22,7 @@ export function renderDocferryHeader(containerEl: HTMLElement, title: string, de
   appendDocferryLogo(header, "docferry-plugin-logo").setAttr("aria-hidden", "true");
 
   const copy = header.createDiv({ cls: "docferry-plugin-header-copy" });
-  copy.createEl("h2", { text: title });
+  copy.createDiv({ text: title, cls: "docferry-heading docferry-heading-2" });
   if (description) {
     copy.createEl("p", { text: description });
   }

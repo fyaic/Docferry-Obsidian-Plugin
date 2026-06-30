@@ -8,9 +8,11 @@
     "allowJs": true,
     "noImplicitAny": true,
     "moduleResolution": "node",
+    "esModuleInterop": true,
     "importHelpers": true,
     "isolatedModules": true,
     "strictNullChecks": true,
+    "useUnknownInCatchVariables": true,
     "lib": [
       "DOM",
       "ES2020"
@@ -20,4 +22,3 @@
     "src/**/*.ts"
   ]
 }
-

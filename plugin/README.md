@@ -6,7 +6,7 @@ Obsidian 插件主体。
 
 - manifest id：`docferry`
 - display name：`DocFerry`
-- current version：`0.0.15`
+- current version：`0.0.16`
 
 `manifest.id` 已收敛到产品名 `docferry`。登录回调只使用 `obsidian://docferry-auth?...`，不再保留开发期旧回调 action。
 

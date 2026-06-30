@@ -125,7 +125,7 @@ export class DocferryDashboardView extends ItemView {
     const home = containerEl.createDiv({ cls: "docferry-import-home" });
     const panel = home.createDiv({ cls: "docferry-import-panel" });
     appendDocferryLogo(panel, "docferry-import-mark docferry-import-logo").setAttr("aria-hidden", "true");
-    panel.createEl("h2", { text: "Import a DocFerry link" });
+    panel.createDiv({ text: "Import a DocFerry link", cls: "docferry-heading docferry-heading-2" });
     panel.createEl("p", {
       text: "Paste a DocFerry URL. The note opens in Obsidian."
     });
@@ -219,7 +219,7 @@ export class DocferryDashboardView extends ItemView {
     for (const share of this.shares) {
       const row = list.createDiv({ cls: "docferry-share-row docferry-workspace-share-row" });
       const main = row.createDiv({ cls: "docferry-share-main" });
-      main.createEl("h4", { text: share.title || share.source_path });
+      main.createDiv({ text: share.title || share.source_path, cls: "docferry-heading docferry-heading-4" });
       main.createEl("p", { text: share.source_path });
       const meta = main.createDiv({ cls: "docferry-share-meta" });
       meta.createSpan({ text: vaultLabel(share) });
@@ -287,7 +287,7 @@ export class DocferryDashboardView extends ItemView {
     const card = page.createDiv({ cls: "docferry-account-card docferry-workspace-account-card" });
     renderAccountAvatar(card, account?.displayUser, "docferry-account-avatar");
     const details = card.createDiv({ cls: "docferry-account-details" });
-    details.createEl("h4", { text: displayName });
+    details.createDiv({ text: displayName, cls: "docferry-heading docferry-heading-4" });
     details.createEl("p", {
       text:
         this.host.settings.authMode === "company-sso"
@@ -305,7 +305,7 @@ export class DocferryDashboardView extends ItemView {
     const membershipCard = page.createDiv({ cls: "docferry-membership-card docferry-workspace-membership-card" });
     const membershipHeader = membershipCard.createDiv({ cls: "docferry-membership-header" });
     const membershipCopy = membershipHeader.createDiv();
-    membershipCopy.createEl("h4", { text: "Access limits" });
+    membershipCopy.createDiv({ text: "Access limits", cls: "docferry-heading docferry-heading-4" });
     membershipCopy.createEl("p", {
       text: membership
         ? `${membershipAccessLabel(membership)} limits refreshed ${formatDateTime(membership.refreshedAt)}.`
@@ -329,7 +329,7 @@ export class DocferryDashboardView extends ItemView {
     if (membership?.billingEnabled) {
       const center = membershipCard.createDiv({ cls: "docferry-membership-center" });
       const centerCopy = center.createDiv({ cls: "docferry-membership-center-copy" });
-      centerCopy.createEl("h5", { text: "Billing" });
+      centerCopy.createDiv({ text: "Billing", cls: "docferry-heading docferry-heading-5" });
       centerCopy.createEl("p", { text: "Manage paid access on the DocFerry web dashboard." });
       const centerButton = center.createEl("button", { cls: "mod-cta", attr: { type: "button" } });
       appendButtonLabel(centerButton, "external-link", "Open billing");
@@ -341,7 +341,7 @@ export class DocferryDashboardView extends ItemView {
 
     const requestPanel = page.createDiv({ cls: "docferry-account-request-panel" });
     const requestCopy = requestPanel.createDiv({ cls: "docferry-account-request-copy" });
-    requestCopy.createEl("h4", { text: "Need more capacity?" });
+    requestCopy.createDiv({ text: "Need more capacity?", cls: "docferry-heading docferry-heading-4" });
     requestCopy.createEl("p", {
       text: connected
         ? "Tell us what you want to publish. DocFerry staff review early requests and can upgrade approved accounts to Plus."
@@ -391,7 +391,7 @@ export class DocferryDashboardView extends ItemView {
     });
 
     const copy = header.createDiv({ cls: "docferry-workspace-page-copy" });
-    copy.createEl("h2", { text: title });
+    copy.createDiv({ text: title, cls: "docferry-heading docferry-heading-2" });
     copy.createEl("p", { text: description });
 
     if (actionLabel && actionIcon && action) {
@@ -533,7 +533,7 @@ export class DocferryDashboardView extends ItemView {
 
   private renderEmpty(containerEl: HTMLElement, title: string, message: string, isError = false): void {
     const empty = containerEl.createDiv({ cls: `docferry-settings-empty ${isError ? "is-error" : ""}` });
-    empty.createEl("h4", { text: title });
+    empty.createDiv({ text: title, cls: "docferry-heading docferry-heading-4" });
     empty.createEl("p", { text: message });
   }
 }

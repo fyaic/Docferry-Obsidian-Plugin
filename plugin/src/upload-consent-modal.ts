@@ -28,7 +28,7 @@ class DocferryUploadConsentModal extends Modal {
     const header = contentEl.createDiv({ cls: "docferry-consent-header" });
     appendDocferryLogo(header, "docferry-consent-logo").setAttr("aria-hidden", "true");
     const copy = header.createDiv({ cls: "docferry-consent-copy" });
-    copy.createEl("h2", { text: this.context === "startup" ? "Before using DocFerry" : "Publish with DocFerry" });
+    copy.createDiv({ text: this.context === "startup" ? "Before using DocFerry" : "Publish with DocFerry", cls: "docferry-heading docferry-heading-2" });
     copy.createEl("p", {
       text:
         "DocFerry does not upload your vault automatically. When you publish, the selected note and explicitly referenced local assets are sent to DocFerry servers so the share link can open on the web."

@@ -1,8 +1,8 @@
 {
   "id": "docferry",
   "name": "DocFerry",
-  "version": "0.0.15",
-  "minAppVersion": "1.4.0",
+  "version": "0.0.16",
+  "minAppVersion": "1.13.0",
   "description": "Publish one Obsidian note to a secure DocFerry share link.",
   "author": "Fuyonder",
   "authorUrl": "https://fuyonder.tech",

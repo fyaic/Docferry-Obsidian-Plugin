@@ -137,7 +137,7 @@ export default class DocferryPlugin extends Plugin {
     this.settingTab = new DocferrySettingTab(this.app, this);
     this.addSettingTab(this.settingTab);
     this.registerView(DOCFERRY_DASHBOARD_VIEW_TYPE, (leaf) => new DocferryDashboardView(leaf, this));
-    this.addRibbonIcon("ship", "Open DocFerry", () => {
+    this.addRibbonIcon("ship", "Open dashboard", () => {
       void this.activateDashboardView();
     });
     for (const action of PROTOCOL_ACTIONS) {
@@ -157,7 +157,7 @@ export default class DocferryPlugin extends Plugin {
 
     this.addCommand({
       id: "open-dashboard",
-      name: "Open DocFerry dashboard",
+      name: "Open dashboard",
       callback: () => {
         void this.activateDashboardView();
       }
@@ -269,7 +269,8 @@ export default class DocferryPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const loadedSettings = (await this.loadData()) as Partial<DocferrySettings> | null;
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, loadedSettings ?? {});
     let changed = false;
     if (!this.settings.clientInstanceId) {
       this.settings.clientInstanceId = `obs_${crypto.randomUUID()}`;
@@ -969,13 +970,7 @@ export default class DocferryPlugin extends Plugin {
   ): Promise<HtmlSnapshotResult | null> {
     const doc = currentDocument();
     const container = doc.createElement("div");
-    container.className = "markdown-preview-view markdown-rendered docferry-snapshot-source";
-    container.style.position = "fixed";
-    container.style.left = "-10000px";
-    container.style.top = "0";
-    container.style.width = "860px";
-    container.style.pointerEvents = "none";
-    container.style.visibility = "hidden";
+    container.className = "markdown-preview-view markdown-rendered docferry-snapshot-source docferry-snapshot-hidden-host";
     doc.body.appendChild(container);
     const renderContext = new Component();
     renderContext.load();
@@ -1388,7 +1383,7 @@ function customPropertiesFor(element: Element): string[] {
 }
 
 function currentDocument(): Document {
-  return window.activeDocument ?? document;
+  return activeDocument;
 }
 
 function collectMatchingRules(
@@ -1420,7 +1415,7 @@ function selectorMatchesContainer(selectorText: string, container: HTMLElement):
     .some((selector) => {
       try {
         return container.matches(selector) || Boolean(container.querySelector(selector));
-      } catch (_error) {
+      } catch {
         return false;
       }
     });
@@ -1554,7 +1549,7 @@ async function mapWithConcurrency<T, R>(
   concurrency: number,
   mapper: (item: T, index: number) => Promise<R>
 ): Promise<R[]> {
-  const results: R[] = new Array(items.length);
+  const results: Array<R | undefined> = new Array<R | undefined>(items.length).fill(undefined);
   let nextIndex = 0;
   const workerCount = Math.min(Math.max(concurrency, 1), items.length);
   await Promise.all(
@@ -1566,7 +1561,10 @@ async function mapWithConcurrency<T, R>(
       }
     })
   );
-  return results;
+  return results.map((result): R => {
+    if (result === undefined) throw new Error("Concurrent task did not produce a result.");
+    return result;
+  });
 }
 
 function assetRoleForExtension(extension: string): UploadedLocalAsset["role"] | null {

@@ -30,11 +30,44 @@
   width: 100%;
 }
 
-.docferry-plugin-header-copy h2 {
+.docferry-plugin-header-copy .docferry-heading-2 {
   font-size: 1.35rem;
   letter-spacing: 0;
   line-height: 1.2;
   margin: 0;
+}
+
+.docferry-heading {
+  color: var(--text-normal);
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.docferry-heading-2 {
+  font-size: 1.35rem;
+}
+
+.docferry-heading-3 {
+  font-size: 1.15rem;
+}
+
+.docferry-heading-4 {
+  font-size: 1rem;
+}
+
+.docferry-heading-5 {
+  font-size: 0.9rem;
+}
+
+.docferry-snapshot-hidden-host {
+  left: -10000px;
+  pointer-events: none;
+  position: fixed;
+  top: 0;
+  visibility: hidden;
+  width: 860px;
 }
 
 .docferry-plugin-header-copy p {
@@ -132,10 +165,10 @@
   margin-bottom: 14px;
 }
 
-.docferry-panel-header h3,
-.docferry-account-details h4,
-.docferry-share-main h4,
-.docferry-settings-empty h4 {
+.docferry-panel-header .docferry-heading-3,
+.docferry-account-details .docferry-heading-4,
+.docferry-share-main .docferry-heading-4,
+.docferry-settings-empty .docferry-heading-4 {
   letter-spacing: 0;
   margin: 0;
 }
@@ -238,7 +271,7 @@
   justify-content: space-between;
 }
 
-.docferry-membership-header h4 {
+.docferry-membership-header .docferry-heading-4 {
   letter-spacing: 0;
   margin: 0;
 }
@@ -305,7 +338,7 @@
   min-width: 0;
 }
 
-.docferry-membership-center-copy h5 {
+.docferry-membership-center-copy .docferry-heading-5 {
   font-size: 0.86rem;
   letter-spacing: 0;
   line-height: 1.2;
@@ -343,7 +376,7 @@
   min-width: 0;
 }
 
-.docferry-account-request-copy h4 {
+.docferry-account-request-copy .docferry-heading-4 {
   font-size: 0.98rem;
   letter-spacing: 0;
   line-height: 1.2;
@@ -372,7 +405,7 @@
   padding: 12px;
 }
 
-.docferry-access-request-card h5 {
+.docferry-access-request-card .docferry-heading-5 {
   font-size: 0.95rem;
   letter-spacing: 0;
   line-height: 1.2;
@@ -447,7 +480,7 @@
   min-width: 0;
 }
 
-.docferry-share-main h4,
+.docferry-share-main .docferry-heading-4,
 .docferry-share-main p {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -806,7 +839,7 @@
   box-shadow: none;
 }
 
-.docferry-import-panel h2 {
+.docferry-import-panel .docferry-heading-2 {
   font-size: clamp(1.55rem, 3vw, 2.05rem);
   letter-spacing: 0;
   line-height: 1.12;
@@ -931,7 +964,7 @@
   grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
-.docferry-workspace-page-copy h2 {
+.docferry-workspace-page-copy .docferry-heading-2 {
   font-size: 1.35rem;
   letter-spacing: 0;
   line-height: 1.2;
@@ -1034,7 +1067,7 @@
   margin-bottom: 12px;
 }
 
-.docferry-dashboard-section-header h3 {
+.docferry-dashboard-section-header .docferry-heading-3 {
   font-size: 1rem;
   letter-spacing: 0;
   line-height: 1.25;
@@ -1150,7 +1183,7 @@
   min-width: 0;
 }
 
-.docferry-consent-copy h2 {
+.docferry-consent-copy .docferry-heading-2 {
   letter-spacing: 0;
   margin: 0;
 }

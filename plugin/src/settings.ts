@@ -166,7 +166,7 @@ export class DocferrySettingTab extends PluginSettingTab {
     const panel = containerEl.createDiv({ cls: "docferry-settings-panel docferry-account-panel" });
     const header = panel.createDiv({ cls: "docferry-panel-header" });
     const copy = header.createDiv();
-    copy.createEl("h3", { text: "Account" });
+    copy.createDiv({ text: "Account", cls: "docferry-heading docferry-heading-3" });
     copy.createEl("p", {
       text: account ? "Fuyonder account is connected." : "Connect a Fuyonder account."
     });
@@ -179,7 +179,7 @@ export class DocferrySettingTab extends PluginSettingTab {
     const card = panel.createDiv({ cls: "docferry-account-card" });
     renderAccountAvatar(card, account?.displayUser, "docferry-account-avatar");
     const details = card.createDiv({ cls: "docferry-account-details" });
-    details.createEl("h4", { text: displayName });
+    details.createDiv({ text: displayName, cls: "docferry-heading docferry-heading-4" });
     if (account?.displayUser?.email && account.displayUser.email !== displayName) {
       details.createEl("p", { text: account.displayUser.email });
     }
@@ -232,7 +232,7 @@ export class DocferrySettingTab extends PluginSettingTab {
     const card = containerEl.createDiv({ cls: "docferry-membership-card" });
     const header = card.createDiv({ cls: "docferry-membership-header" });
     const copy = header.createDiv();
-    copy.createEl("h4", { text: "Access limits" });
+    copy.createDiv({ text: "Access limits", cls: "docferry-heading docferry-heading-4" });
     copy.createEl("p", {
       text: membership
         ? `${membershipAccessLabel(membership)} limits refreshed ${formatDateTime(membership.refreshedAt)}.`
@@ -256,7 +256,7 @@ export class DocferrySettingTab extends PluginSettingTab {
     if (membership?.billingEnabled) {
       const center = card.createDiv({ cls: "docferry-membership-center" });
       const centerCopy = center.createDiv({ cls: "docferry-membership-center-copy" });
-      centerCopy.createEl("h5", { text: "Billing" });
+      centerCopy.createDiv({ text: "Billing", cls: "docferry-heading docferry-heading-5" });
       centerCopy.createEl("p", { text: "Manage paid access on the DocFerry web dashboard." });
       const centerButton = center.createEl("button", {
         text: "Open billing",
@@ -275,7 +275,7 @@ export class DocferrySettingTab extends PluginSettingTab {
     const connected = this.host.settings.authMode === "company-sso" && Boolean(this.host.settings.sessionToken);
     const panel = containerEl.createDiv({ cls: "docferry-account-request-panel docferry-settings-request-panel" });
     const copy = panel.createDiv({ cls: "docferry-account-request-copy" });
-    copy.createEl("h4", { text: "Request Plus access" });
+    copy.createDiv({ text: "Request Plus access", cls: "docferry-heading docferry-heading-4" });
     copy.createEl("p", {
       text: connected
         ? "Tell us what you want to publish. Staff can approve Plus for 10 active shares and 5 MiB per file."
@@ -301,7 +301,7 @@ export class DocferrySettingTab extends PluginSettingTab {
     const panel = containerEl.createDiv({ cls: "docferry-settings-panel" });
     const header = panel.createDiv({ cls: "docferry-panel-header" });
     const copy = header.createDiv();
-    copy.createEl("h3", { text: "Shares" });
+    copy.createDiv({ text: "Shares", cls: "docferry-heading docferry-heading-3" });
     copy.createEl("p", { text: `${this.shares.length} loaded from this account across vaults.` });
     const refreshButton = header.createEl("button", { text: "Refresh", attr: { type: "button" } });
     refreshButton.disabled = this.shareListLoading;
@@ -311,7 +311,7 @@ export class DocferrySettingTab extends PluginSettingTab {
 
     if (!this.hasAuthForShares()) {
       const empty = panel.createDiv({ cls: "docferry-settings-empty" });
-      empty.createEl("h4", { text: "Not connected" });
+      empty.createDiv({ text: "Not connected", cls: "docferry-heading docferry-heading-4" });
       empty.createEl("p", { text: "Connect your Fuyonder account." });
       return;
     }
@@ -327,14 +327,14 @@ export class DocferrySettingTab extends PluginSettingTab {
 
     if (this.shareError) {
       const error = panel.createDiv({ cls: "docferry-settings-empty is-error" });
-      error.createEl("h4", { text: "Share list unavailable" });
+      error.createDiv({ text: "Share list unavailable", cls: "docferry-heading docferry-heading-4" });
       error.createEl("p", { text: this.shareError });
       return;
     }
 
     if (!this.shares.length) {
       const empty = panel.createDiv({ cls: "docferry-settings-empty" });
-      empty.createEl("h4", { text: "No shares yet" });
+      empty.createDiv({ text: "No shares yet", cls: "docferry-heading docferry-heading-4" });
       empty.createEl("p", { text: "Publish a note from the file menu." });
       return;
     }
@@ -343,7 +343,7 @@ export class DocferrySettingTab extends PluginSettingTab {
     for (const share of this.shares) {
       const row = list.createDiv({ cls: "docferry-share-row" });
       const main = row.createDiv({ cls: "docferry-share-main" });
-      main.createEl("h4", { text: share.title || share.source_path });
+      main.createDiv({ text: share.title || share.source_path, cls: "docferry-heading docferry-heading-4" });
       main.createEl("p", { text: share.source_path });
       const meta = main.createDiv({ cls: "docferry-share-meta" });
       meta.createSpan({ text: vaultLabel(share) });
@@ -393,7 +393,7 @@ export class DocferrySettingTab extends PluginSettingTab {
     const panel = containerEl.createDiv({ cls: "docferry-settings-panel docferry-import-panel" });
     const header = panel.createDiv({ cls: "docferry-panel-header" });
     const copy = header.createDiv();
-    copy.createEl("h3", { text: "Import" });
+    copy.createDiv({ text: "Import", cls: "docferry-heading docferry-heading-3" });
     copy.createEl("p", { text: "Import one DocFerry URL into this vault." });
 
     const form = panel.createDiv({ cls: "docferry-import-form" });
@@ -482,7 +482,7 @@ export class DocferrySettingTab extends PluginSettingTab {
     const servicePanel = containerEl.createDiv({ cls: "docferry-settings-panel" });
     const serviceHeader = servicePanel.createDiv({ cls: "docferry-panel-header" });
     const serviceCopy = serviceHeader.createDiv();
-    serviceCopy.createEl("h3", { text: "Config" });
+    serviceCopy.createDiv({ text: "Config", cls: "docferry-heading docferry-heading-3" });
     serviceCopy.createEl("p", { text: "Connection, defaults and diagnostics." });
 
     new Setting(servicePanel)
@@ -548,7 +548,7 @@ export class DocferrySettingTab extends PluginSettingTab {
     const defaultsPanel = containerEl.createDiv({ cls: "docferry-settings-panel" });
     const defaultsHeader = defaultsPanel.createDiv({ cls: "docferry-panel-header" });
     const defaultsCopy = defaultsHeader.createDiv();
-    defaultsCopy.createEl("h3", { text: "Defaults" });
+    defaultsCopy.createDiv({ text: "Defaults", cls: "docferry-heading docferry-heading-3" });
     defaultsCopy.createEl("p", { text: "Initial values for publish and import." });
 
     new Setting(defaultsPanel)
@@ -601,7 +601,7 @@ export class DocferrySettingTab extends PluginSettingTab {
     const diagnosticsPanel = containerEl.createDiv({ cls: "docferry-settings-panel" });
     const diagnosticsHeader = diagnosticsPanel.createDiv({ cls: "docferry-panel-header" });
     const diagnosticsCopy = diagnosticsHeader.createDiv();
-    diagnosticsCopy.createEl("h3", { text: "Diagnostics" });
+    diagnosticsCopy.createDiv({ text: "Diagnostics", cls: "docferry-heading docferry-heading-3" });
     diagnosticsCopy.createEl("p", { text: "Local troubleshooting controls." });
 
     new Setting(diagnosticsPanel)

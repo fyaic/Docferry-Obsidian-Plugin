@@ -1,1 +1,0 @@
-"""Docferry share server package."""

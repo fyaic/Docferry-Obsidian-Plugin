@@ -12,7 +12,7 @@ Public plugin identity:
 - Display name: `DocFerry`
 - Author: `Bondie Labs`
 - Website: [bondie.io/research/docferry](https://bondie.io/research/docferry)
-- Version: `0.0.6`
+- Version: `0.0.14`
 - License: MIT
 
 ## Capabilities

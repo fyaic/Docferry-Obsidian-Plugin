@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.14
+
+- Align public release metadata for Obsidian Community review: bump manifest/package/versions metadata to `0.0.14`, fix the documented minimum Obsidian version, and bring the plugin subdirectory README version up to date.
+- Pin the plugin subdirectory's Obsidian and CodeMirror development dependencies to exact versions so clean review installs do not float to newer peer dependency sets. No plugin behavior changes.
+
 ## 0.0.13
 
 - Replace the `builtin-modules` dependency with Node's built-in `module.builtinModules` in the esbuild config, and remove the package from both the plugin and root `package.json`. Addresses the automated review suggestion to avoid `builtin-modules`. No plugin behavior changes.

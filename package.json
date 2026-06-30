@@ -1,6 +1,6 @@
 {
   "name": "docferry-obsidian-plugin",
-  "version": "0.0.13",
+  "version": "0.0.14",
   "description": "Publish one note to a secure DocFerry share link.",
   "homepage": "https://bondie.io/research/docferry",
   "license": "MIT",

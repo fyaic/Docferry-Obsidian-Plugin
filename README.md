@@ -54,7 +54,7 @@ This branch standardizes DocFerry for an Obsidian Community plugin submission an
 
 ## Requirements
 
-- Obsidian `1.4.0` or later.
+- Obsidian `1.13.0` or later.
 - Desktop Obsidian. The plugin uses desktop-only APIs and is marked `isDesktopOnly: true`.
 - Cloud mode: click `Connect DocFerry Cloud` in the plugin. No custom server URL, account login, OAuth flow, or token copy/paste is required.
 - Custom mode: a DocFerry-compatible server URL and API token.

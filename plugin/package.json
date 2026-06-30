@@ -1,8 +1,7 @@
 {
   "name": "docferry",
-  "version": "0.0.14",
-  "description": "Publish one note to a secure DocFerry share link.",
-  "homepage": "https://bondie.io/research/docferry",
+  "version": "0.0.15",
+  "description": "Obsidian plugin for publishing one note to a secure DocFerry share link.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
@@ -14,18 +13,15 @@
     "publish",
     "markdown"
   ],
-  "author": "Bondie Labs",
-  "license": "MIT",
+  "author": "Fuyonder",
+  "license": "UNLICENSED",
   "devDependencies": {
-    "@codemirror/state": "6.5.0",
-    "@codemirror/view": "6.38.6",
     "@types/node": "^20.14.0",
-    "@typescript-eslint/parser": "^8.61.1",
-    "esbuild": "^0.28.1",
-    "eslint": "^9.39.4",
-    "eslint-plugin-obsidianmd": "^0.3.0",
+    "esbuild": "^0.25.12",
     "obsidian": "1.13.0",
-    "typescript": "^5.4.5",
-    "typescript-eslint": "^8.61.1"
+    "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "cos-js-sdk-v5": "1.8.3"
   }
 }

@@ -2,89 +2,44 @@
   align-items: center;
   border-bottom: 1px solid var(--background-modifier-border);
   display: flex;
-  gap: 16px;
+  gap: 14px;
   margin: 0 0 18px;
-  padding: 0 0 18px;
+  padding: 0 0 16px;
 }
 
 .docferry-plugin-logo {
   align-items: center;
-  background: var(--background-secondary);
-  border-radius: 8px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   display: inline-flex;
   flex: 0 0 auto;
-  height: 52px;
+  height: 38px;
   justify-content: center;
-  overflow: hidden;
-  width: 52px;
+  overflow: visible;
+  width: 38px;
 }
 
-.docferry-plugin-logo img {
+.docferry-plugin-logo img,
+.docferry-import-logo img,
+.docferry-workspace-brand-mark img,
+.docferry-consent-logo img {
   display: block;
-  height: 48px;
+  height: 100%;
   object-fit: contain;
-  width: 48px;
+  width: 100%;
 }
 
-.docferry-plugin-header-copy {
-  align-items: flex-start;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  text-align: left;
-}
-
-.docferry-plugin-title {
+.docferry-plugin-header-copy h2 {
   font-size: 1.35rem;
-  font-weight: var(--font-semibold);
   letter-spacing: 0;
   line-height: 1.2;
   margin: 0;
-  text-align: left;
-  width: 100%;
 }
 
 .docferry-plugin-header-copy p {
   color: var(--text-muted);
   margin: 4px 0 0;
-  text-align: left;
-  width: 100%;
-}
-
-.docferry-snapshot-source {
-  position: fixed;
-  left: -10000px;
-  top: 0;
-  width: 860px;
-  pointer-events: none;
-  visibility: hidden;
-}
-
-.docferry-language-toggle {
-  align-items: center;
-  align-self: flex-start;
-  background: transparent;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 8px;
-  color: var(--text-muted);
-  cursor: pointer;
-  display: inline-flex;
-  flex: 0 0 auto;
-  height: 32px;
-  justify-content: center;
-  margin-left: auto;
-  padding: 0;
-  width: 32px;
-}
-
-.docferry-language-toggle:hover,
-.docferry-language-toggle:focus-visible {
-  color: var(--text-normal);
-}
-
-.docferry-language-toggle svg {
-  height: 18px;
-  width: 18px;
 }
 
 .docferry-title-input,
@@ -93,7 +48,1129 @@
 }
 
 .docferry-settings-tab {
+  max-width: 1080px;
+}
+
+.docferry-settings-layout {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 174px minmax(0, 1fr);
+}
+
+.docferry-settings-nav {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 5px;
+  grid-template-columns: 1fr;
+  margin: 0;
+  padding: 6px;
+  position: sticky;
+  top: 12px;
+}
+
+.docferry-settings-nav-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  font-weight: 600;
+  justify-content: flex-start;
+  letter-spacing: 0;
+  min-height: 38px;
+  padding: 7px 9px;
+  text-align: left;
+  width: 100%;
+}
+
+.docferry-settings-nav-button:hover,
+.docferry-settings-nav-button.is-active {
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.docferry-settings-nav-icon {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 18px;
+  justify-content: center;
+  width: 18px;
+}
+
+.docferry-settings-nav-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docferry-settings-body {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.docferry-settings-panel {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.docferry-panel-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.docferry-panel-header h3,
+.docferry-account-details h4,
+.docferry-share-main h4,
+.docferry-settings-empty h4 {
+  letter-spacing: 0;
+  margin: 0;
+}
+
+.docferry-panel-header p,
+.docferry-account-details p,
+.docferry-share-main p,
+.docferry-settings-empty p {
+  color: var(--text-muted);
+  line-height: 1.35;
+  margin: 4px 0 0;
+}
+
+.docferry-status-badge,
+.docferry-pill {
+  align-items: center;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1;
+  min-height: 24px;
+  padding: 4px 9px;
+  white-space: nowrap;
+}
+
+.docferry-status-badge.is-ok,
+.docferry-pill.is-ok {
+  color: var(--text-success);
+}
+
+.docferry-pill.is-locked {
+  color: var(--text-accent);
+}
+
+.docferry-pill.is-warning {
+  color: var(--text-warning);
+}
+
+.docferry-pill.is-muted {
+  color: var(--text-faint);
+}
+
+.docferry-account-card {
+  align-items: flex-start;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  display: flex;
+  gap: 14px;
+  padding: 14px;
+}
+
+.docferry-account-avatar {
+  align-items: center;
+  background: var(--interactive-accent);
+  border-radius: 8px;
+  color: var(--text-on-accent);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 0.95rem;
+  font-weight: 800;
+  height: 46px;
+  justify-content: center;
+  letter-spacing: 0;
+  width: 46px;
+}
+
+.docferry-account-avatar img {
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.docferry-account-details {
+  min-width: 0;
+}
+
+.docferry-membership-card {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 14px;
+}
+
+.docferry-membership-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.docferry-membership-header h4 {
+  letter-spacing: 0;
+  margin: 0;
+}
+
+.docferry-membership-header p,
+.docferry-membership-note {
+  color: var(--text-muted);
+  margin: 4px 0 0;
+}
+
+.docferry-membership-stats {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.docferry-membership-stat {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px;
+}
+
+.docferry-membership-stat span {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+
+.docferry-membership-stat strong {
+  font-size: 0.95rem;
+  letter-spacing: 0;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.docferry-membership-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.docferry-membership-actions button {
+  border-radius: 6px;
+}
+
+.docferry-membership-center {
+  align-items: end;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 10px;
+}
+
+.docferry-membership-center-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.docferry-membership-center-copy h5 {
+  font-size: 0.86rem;
+  letter-spacing: 0;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.docferry-membership-center-copy p {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.docferry-membership-center button {
+  border-radius: 6px;
+  min-height: 34px;
+  white-space: nowrap;
+}
+
+.docferry-account-request-panel {
+  align-items: center;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-top: 12px;
+  padding: 14px;
+}
+
+.docferry-account-request-copy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.docferry-account-request-copy h4 {
+  font-size: 0.98rem;
+  letter-spacing: 0;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.docferry-account-request-copy p {
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin: 0;
+}
+
+.docferry-account-request-panel button {
+  border-radius: 6px;
+  min-height: 36px;
+  white-space: nowrap;
+}
+
+.docferry-access-request-card {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.docferry-access-request-card h5 {
+  font-size: 0.95rem;
+  letter-spacing: 0;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.docferry-access-request-card p {
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.docferry-access-request-card button {
+  justify-self: start;
+}
+
+.docferry-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.docferry-import-form {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.docferry-import-input {
+  min-height: 36px;
+  min-width: 0;
+  width: 100%;
+}
+
+.docferry-import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.docferry-import-actions button {
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.docferry-import-details {
+  color: var(--text-faint);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  gap: 7px 12px;
+  margin-top: 12px;
+}
+
+.docferry-share-list {
+  display: grid;
+  gap: 10px;
+}
+
+.docferry-share-row {
+  align-items: center;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding: 12px;
+}
+
+.docferry-share-main {
+  min-width: 0;
+}
+
+.docferry-share-main h4,
+.docferry-share-main p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docferry-share-meta,
+.docferry-share-badges,
+.docferry-share-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.docferry-share-meta {
+  color: var(--text-faint);
+  font-size: 0.82rem;
+  margin-top: 6px;
+}
+
+.docferry-share-actions button,
+.docferry-panel-header button,
+.docferry-settings-actions button {
+  border-radius: 6px;
+}
+
+.docferry-settings-body .docferry-share-row {
+  align-items: stretch;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.docferry-settings-body .docferry-share-badges,
+.docferry-settings-body .docferry-share-actions {
+  justify-content: flex-start;
+}
+
+.docferry-settings-body .docferry-share-actions button {
+  flex: 0 1 auto;
+}
+
+.docferry-stop-share-button {
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  min-width: 118px;
+}
+
+.docferry-stop-share-button:hover:not(:disabled) {
+  background: var(--background-modifier-hover);
+  border-color: var(--background-modifier-border-hover);
+  color: var(--text-normal);
+}
+
+.docferry-action-state {
+  align-items: center;
+  color: var(--text-faint);
+  display: inline-flex;
+  font-size: 0.82rem;
+  min-height: 32px;
+  padding: 0 4px;
+}
+
+.docferry-settings-empty {
+  background: var(--background-secondary);
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.docferry-settings-empty.is-error {
+  border-color: var(--text-error);
+}
+
+.docferry-skeleton-line {
+  background: var(--background-modifier-border);
+  border-radius: 999px;
+  height: 10px;
+  max-width: 20rem;
+  opacity: 0.72;
+  width: 68%;
+}
+
+.docferry-skeleton-line.is-title {
+  height: 13px;
+  margin-bottom: 10px;
+  width: 44%;
+}
+
+.docferry-button-icon {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 16px;
+  justify-content: center;
+  width: 16px;
+}
+
+.docferry-button-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docferry-dashboard-view {
+  --df-background: var(--background-primary);
+  --df-surface: var(--background-primary);
+  --df-surface-muted: var(--background-secondary);
+  --df-border: var(--background-modifier-border);
+  --df-border-hover: var(--background-modifier-border-hover, var(--background-modifier-border));
+  --df-text: var(--text-normal);
+  --df-muted: var(--text-muted);
+  --df-faint: var(--text-faint);
+  --df-accent: var(--interactive-accent);
+  --df-accent-text: var(--text-on-accent);
+  --df-radius: 8px;
+  --df-shadow: 0 12px 34px rgba(31, 45, 52, 0.1);
+  --df-pattern-opacity: 0.22;
+  --df-pattern-line: rgba(80, 116, 130, 0.14);
+  --df-pattern-line: color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+  --df-pattern-soft: rgba(110, 118, 126, 0.12);
+  --df-pattern-soft: color-mix(in srgb, var(--background-modifier-border) 38%, transparent);
+  --df-panel-background: var(--background-primary);
+  --df-panel-background: color-mix(in srgb, var(--background-primary) 96%, transparent);
+  --df-shortcut-background: var(--background-secondary);
+  --df-shortcut-background: color-mix(in srgb, var(--background-secondary) 74%, var(--background-primary));
+  --df-shortcut-hover: var(--background-modifier-hover);
+  --df-shortcut-hover: color-mix(in srgb, var(--background-modifier-hover) 70%, var(--background-primary));
+  accent-color: var(--df-accent);
+  background: var(--df-background);
+  color: var(--df-text);
+  font-family: var(--font-interface);
+  height: 100%;
+  isolation: isolate;
+  overflow: auto;
+  position: relative;
+}
+
+.theme-dark .docferry-dashboard-view {
+  --df-shadow: 0 12px 34px rgba(5, 8, 12, 0.34);
+  --df-pattern-opacity: 0.16;
+  --df-panel-background: var(--background-primary);
+  --df-panel-background: color-mix(in srgb, var(--background-primary) 92%, transparent);
+  --df-shortcut-background: var(--background-secondary);
+  --df-shortcut-background: color-mix(in srgb, var(--background-secondary) 62%, var(--background-primary));
+  --df-shortcut-hover: var(--background-modifier-hover);
+  --df-shortcut-hover: color-mix(in srgb, var(--background-modifier-hover) 58%, var(--background-primary));
+}
+
+.docferry-dashboard-view::before {
+  background:
+    linear-gradient(138deg, transparent 0 66%, var(--df-pattern-line) 66.1% 66.36%, transparent 66.6%),
+    repeating-linear-gradient(
+      162deg,
+      transparent 0 58px,
+      var(--df-pattern-soft) 59px 60px,
+      transparent 61px 118px
+    ),
+    repeating-radial-gradient(
+      ellipse at 22% 96%,
+      transparent 0 48px,
+      var(--df-pattern-line) 49px 50px,
+      transparent 51px 96px
+    );
+  content: "";
+  inset: 0;
+  opacity: var(--df-pattern-opacity);
+  pointer-events: none;
+  position: absolute;
+  z-index: 0;
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .docferry-import-panel {
+    background: var(--df-surface);
+  }
+}
+
+@media (forced-colors: active) {
+  .docferry-dashboard-view::before,
+  .docferry-dashboard-view::after {
+    display: none;
+  }
+
+  .docferry-import-panel {
+    box-shadow: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .docferry-dashboard-view::before,
+  .docferry-dashboard-view::after {
+    display: none;
+  }
+
+  .docferry-import-panel {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: var(--df-surface);
+  }
+}
+
+.docferry-dashboard-view::after {
+  background:
+    linear-gradient(90deg, transparent 0 9%, var(--df-pattern-soft) 9.2% 9.4%, transparent 9.6%),
+    linear-gradient(0deg, transparent 0 76%, var(--df-pattern-line) 76.2% 76.6%, transparent 76.8%);
+  content: "";
+  inset: auto 20px 18px auto;
+  height: 120px;
+  opacity: calc(var(--df-pattern-opacity) * 0.72);
+  pointer-events: none;
+  position: absolute;
+  transform: rotate(-3deg);
+  width: min(42vw, 420px);
+  z-index: 0;
+}
+
+.docferry-workspace-shell {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  margin: 0 auto;
   max-width: 980px;
+  min-height: 100%;
+  padding: clamp(16px, 2vw, 28px);
+  position: relative;
+  z-index: 1;
+}
+
+.docferry-workspace-topbar {
+  align-items: center;
+  border-bottom: 1px solid var(--df-border);
+  display: flex;
+  gap: 12px;
+  justify-content: flex-start;
+  padding: 0 0 14px;
+}
+
+.docferry-workspace-brand {
+  align-items: center;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: var(--df-radius);
+  box-shadow: none !important;
+  color: var(--df-text);
+  cursor: pointer;
+  display: inline-flex;
+  gap: 10px;
+  justify-content: flex-start;
+  min-width: 0;
+  padding: 6px;
+  text-align: left;
+}
+
+.docferry-workspace-brand:hover {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.docferry-workspace-brand:focus,
+.docferry-workspace-brand:focus-visible {
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: 1px solid var(--df-border);
+  outline-offset: 4px;
+}
+
+.docferry-workspace-brand-mark,
+.docferry-import-mark {
+  align-items: center;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0;
+  box-shadow: none !important;
+  color: var(--df-accent-text);
+  display: inline-flex;
+  flex: 0 0 auto;
+  justify-content: center;
+  overflow: visible;
+}
+
+.docferry-workspace-brand-mark {
+  height: 34px;
+  width: 34px;
+}
+
+.docferry-workspace-brand-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.docferry-workspace-brand-title {
+  font-size: 0.98rem;
+  font-weight: 750;
+  line-height: 1.15;
+}
+
+.docferry-workspace-brand-subtitle {
+  color: var(--df-muted);
+  font-size: 0.78rem;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docferry-workspace-page-header button,
+.docferry-workspace-page-actions button,
+.docferry-import-row button,
+.docferry-import-shortcut,
+.docferry-share-actions button {
+  align-items: center;
+  border-radius: 6px;
+  display: inline-flex;
+  gap: 6px;
+  justify-content: center;
+  min-height: 32px;
+  white-space: nowrap;
+}
+
+.docferry-import-home {
+  align-items: center;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(18px, 4vh, 34px) 0;
+}
+
+.docferry-import-panel {
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  background: var(--df-panel-background);
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius);
+  box-shadow: var(--df-shadow);
+  box-sizing: border-box;
+  max-width: 720px;
+  padding: clamp(22px, 3vw, 30px);
+  width: min(100%, 720px);
+}
+
+.docferry-import-mark {
+  height: 44px;
+  margin-bottom: 16px;
+  width: 44px;
+}
+
+.docferry-import-logo {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none;
+}
+
+.docferry-import-panel h2 {
+  font-size: clamp(1.55rem, 3vw, 2.05rem);
+  letter-spacing: 0;
+  line-height: 1.12;
+  margin: 0;
+}
+
+.docferry-import-panel > p {
+  color: var(--df-muted);
+  font-size: 0.98rem;
+  line-height: 1.45;
+  margin: 10px 0 22px;
+  max-width: 44rem;
+}
+
+.docferry-import-field {
+  display: grid;
+  gap: 8px;
+}
+
+.docferry-import-field label {
+  color: var(--df-text);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.docferry-import-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.docferry-import-url-input {
+  font-size: 0.95rem;
+  min-height: 40px;
+  min-width: 0;
+  width: 100%;
+}
+
+.docferry-import-help {
+  color: var(--df-faint);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.docferry-import-shortcuts {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 20px;
+  padding-top: 14px;
+  width: 100%;
+  border-top: 1px solid var(--df-border);
+}
+
+.docferry-import-shortcut {
+  align-items: flex-start;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--df-shortcut-background);
+  border: 1px solid var(--df-border);
+  box-shadow: none;
+  color: var(--df-text);
+  cursor: pointer;
+  gap: 9px;
+  justify-content: flex-start;
+  min-height: 62px;
+  padding: 11px;
+  text-align: left;
+  width: 100%;
+}
+
+.docferry-import-shortcut:hover {
+  background: var(--df-shortcut-hover);
+  border-color: var(--df-border-hover);
+}
+
+.docferry-import-shortcut-icon {
+  align-items: center;
+  color: var(--text-accent);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 18px;
+  justify-content: center;
+  margin-top: 1px;
+  width: 18px;
+}
+
+.docferry-import-shortcut-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.docferry-import-shortcut-title {
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.docferry-import-shortcut-description {
+  color: var(--df-muted);
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+.docferry-workspace-page {
+  display: grid;
+  gap: 14px;
+  padding: 18px 0 0;
+}
+
+.docferry-workspace-content {
+  display: grid;
+  min-height: 0;
+}
+
+.docferry-workspace-page-header {
+  align-items: flex-start;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.docferry-workspace-page-copy h2 {
+  font-size: 1.35rem;
+  letter-spacing: 0;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.docferry-workspace-page-copy p {
+  color: var(--df-muted);
+  margin: 4px 0 0;
+}
+
+.docferry-workspace-share-list {
+  gap: 9px;
+}
+
+.docferry-workspace-share-row {
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding: 11px;
+}
+
+.docferry-workspace-account-card {
+  max-width: 680px;
+}
+
+.docferry-workspace-membership-card {
+  max-width: 680px;
+}
+
+.docferry-account-page .docferry-account-request-panel {
+  background: var(--df-shortcut-background);
+  border-color: var(--df-border);
+  max-width: 680px;
+}
+
+.docferry-account-page .docferry-account-request-copy p {
+  color: var(--df-muted);
+}
+
+.docferry-workspace-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.docferry-dashboard-shell {
+  margin: 0 auto;
+  max-width: 1120px;
+  padding: 18px;
+}
+
+.docferry-dashboard-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin: -6px 0 14px;
+}
+
+.docferry-dashboard-toolbar button,
+.docferry-dashboard-actions button,
+.docferry-share-actions button,
+.docferry-dashboard-input-row button {
+  align-items: center;
+  border-radius: 6px;
+  display: inline-flex;
+  gap: 6px;
+  justify-content: center;
+  min-height: 32px;
+  white-space: nowrap;
+}
+
+.docferry-dashboard-grid {
+  align-items: start;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(250px, 0.36fr) minmax(0, 1fr);
+}
+
+.docferry-dashboard-side,
+.docferry-dashboard-main {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.docferry-dashboard-section {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.docferry-dashboard-section-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.docferry-dashboard-section-header h3 {
+  font-size: 1rem;
+  letter-spacing: 0;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.docferry-dashboard-section-header p {
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  line-height: 1.35;
+  margin: 3px 0 0;
+}
+
+.docferry-dashboard-account-card {
+  padding: 12px;
+}
+
+.docferry-dashboard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.docferry-dashboard-field {
+  display: grid;
+  gap: 7px;
+}
+
+.docferry-dashboard-field label {
+  color: var(--text-normal);
+  font-size: 0.83rem;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.docferry-dashboard-input-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.docferry-dashboard-input {
+  min-height: 34px;
+  min-width: 0;
+  width: 100%;
+}
+
+.docferry-dashboard-inline-error,
+.docferry-dashboard-inline-success {
+  background: var(--background-secondary);
+  border-radius: 6px;
+  font-size: 0.84rem;
+  line-height: 1.35;
+  margin-top: 10px;
+  padding: 9px 10px;
+}
+
+.docferry-dashboard-inline-error {
+  border: 1px solid var(--text-error);
+  color: var(--text-error);
+}
+
+.docferry-dashboard-inline-success {
+  border: 1px solid var(--text-success);
+  color: var(--text-success);
+}
+
+.docferry-dashboard-share-list {
+  gap: 9px;
+}
+
+.docferry-dashboard-share-row {
+  align-items: start;
+  grid-template-columns: 1fr;
+  padding: 11px;
+}
+
+.docferry-dashboard-share-row .docferry-share-actions {
+  justify-content: flex-start;
+}
+
+.docferry-password-modal .setting-item {
+  align-items: flex-start;
+}
+
+.docferry-password-input {
+  min-width: min(24rem, 100%);
+}
+
+.docferry-upload-consent-modal {
+  display: grid;
+  gap: 14px;
+}
+
+.docferry-consent-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 14px;
+}
+
+.docferry-consent-logo {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 44px;
+  justify-content: center;
+  overflow: hidden;
+  width: 44px;
+}
+
+.docferry-consent-copy {
+  min-width: 0;
+}
+
+.docferry-consent-copy h2 {
+  letter-spacing: 0;
+  margin: 0;
+}
+
+.docferry-consent-copy p,
+.docferry-consent-details p {
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin: 6px 0 0;
+}
+
+.docferry-consent-details {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.docferry-consent-actions {
+  justify-content: flex-end;
 }
 
 .docferry-settings-tab .setting-item {
@@ -118,167 +1195,89 @@
   width: 100%;
 }
 
-.docferry-settings-tab .docferry-token-setting .setting-item-control {
-  align-items: flex-start;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.docferry-settings-tab .docferry-token-setting .setting-item-control input[type="password"] {
-  max-width: 100%;
-}
-
-.docferry-settings-tab .docferry-token-setting .setting-item-control button {
-  align-self: flex-start;
-}
-
-.docferry-settings-tab .docferry-advanced-token {
-  border-top: 1px solid var(--background-modifier-border);
-  margin: 10px 0 16px;
-  padding-top: 10px;
-}
-
-.docferry-settings-tab .docferry-advanced-token summary {
-  color: var(--text-muted);
-  cursor: pointer;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-
-.docferry-share-management {
-  border-top: 1px solid var(--background-modifier-border);
-  margin-top: 24px;
-  padding-top: 18px;
-}
-
-.docferry-share-management-header {
-  align-items: flex-start;
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
-}
-
-.docferry-share-management-copy {
-  min-width: 0;
-}
-
-.docferry-share-management-copy h3 {
-  font-size: 1.05rem;
-  letter-spacing: 0;
-  line-height: 1.3;
-  margin: 0;
-}
-
-.docferry-share-management-copy p {
-  margin: 4px 0 0;
-}
-
-.docferry-share-management-actions,
-.docferry-share-row-actions {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.docferry-share-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.docferry-share-empty {
-  color: var(--text-muted);
-  padding: 8px 0;
-}
-
-.docferry-share-row {
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 8px;
-  display: grid;
-  gap: 12px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  padding: 12px;
-}
-
-.docferry-share-row-main {
-  min-width: 0;
-}
-
-.docferry-share-title-line {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.docferry-share-title {
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.docferry-share-path {
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
-  margin-top: 3px;
-  overflow-wrap: anywhere;
-}
-
-.docferry-share-details {
-  align-items: center;
-  color: var(--text-muted);
-  display: flex;
-  flex-wrap: wrap;
-  font-size: var(--font-ui-smaller);
-  gap: 6px 12px;
-  margin-top: 8px;
-}
-
-.docferry-share-status {
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
-  line-height: 1.2;
-  padding: 2px 6px;
-}
-
-.docferry-share-status-published,
-.docferry-share-status-password_protected {
-  color: var(--text-accent);
-}
-
-.docferry-share-status-expired,
-.docferry-share-status-stopped,
-.docferry-share-status-not_in_account,
-.docferry-share-error {
-  color: var(--text-error);
-}
-
 @media (max-width: 760px) {
+  .docferry-settings-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .docferry-settings-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    position: static;
+  }
+
+  .docferry-panel-header,
+  .docferry-account-card,
+  .docferry-membership-header {
+    flex-direction: column;
+  }
+
+  .docferry-membership-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .docferry-import-form,
+  .docferry-share-row,
+  .docferry-membership-center,
+  .docferry-account-request-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .docferry-share-actions button {
+    flex: 1 1 8rem;
+  }
+
+  .docferry-dashboard-shell {
+    padding: 14px;
+  }
+
+  .docferry-dashboard-grid,
+  .docferry-dashboard-input-row,
+  .docferry-dashboard-share-row {
+    grid-template-columns: 1fr;
+  }
+
+  .docferry-dashboard-toolbar {
+    justify-content: flex-start;
+  }
+
+  .docferry-dashboard-section-header {
+    flex-direction: column;
+  }
+
+  .docferry-workspace-shell {
+    padding: 14px;
+  }
+
+  .docferry-workspace-topbar,
+  .docferry-workspace-page-header {
+    grid-template-columns: 1fr;
+  }
+
+  .docferry-workspace-topbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .docferry-import-home {
+    justify-content: flex-start;
+    padding-top: 22px;
+  }
+
+  .docferry-import-panel {
+    padding: 20px;
+  }
+
+  .docferry-import-row,
+  .docferry-import-shortcuts,
+  .docferry-workspace-share-row {
+    grid-template-columns: 1fr;
+  }
+
   .docferry-settings-tab .setting-item {
     flex-direction: column;
   }
 
   .docferry-settings-tab .setting-item-control {
     width: 100%;
-  }
-
-  .docferry-plugin-header {
-    align-items: flex-start;
-  }
-
-  .docferry-share-management-header,
-  .docferry-share-row {
-    grid-template-columns: 1fr;
-  }
-
-  .docferry-share-management-header {
-    flex-direction: column;
-  }
-
-  .docferry-share-row-actions {
-    justify-content: flex-start;
   }
 }

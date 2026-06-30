@@ -30,11 +30,11 @@ const context = await esbuild.context({
     ...builtins
   ],
   format: "cjs",
+  loader: {
+    ".base64": "text"
+  },
   target: "es2018",
   logLevel: "info",
-  loader: {
-    ".png": "dataurl"
-  },
   sourcemap: prod ? false : "inline",
   treeShaking: true,
   outfile: "main.js",
@@ -47,4 +47,3 @@ if (prod) {
 } else {
   await context.watch();
 }
-

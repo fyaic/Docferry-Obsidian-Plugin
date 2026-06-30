@@ -1,18 +1,29 @@
-import docferryLogoUrl from "./assets/docferry-logo.png";
+import logo128Base64 from "../logo-128.base64";
 
 export const DOCFERRY_PRODUCT_NAME = "DocFerry";
 export const DOCFERRY_PRODUCT_DESCRIPTION = "Secure single-note sharing for Obsidian.";
-export const DOCFERRY_WEBSITE_URL = "https://bondie.io/research/docferry";
+export const DOCFERRY_LOGO_128_DATA_URI = `data:image/png;base64,${logo128Base64.trim()}`;
 
-export function renderDocferryHeader(containerEl: HTMLElement, title: string, description?: string): HTMLElement {
+export function appendDocferryLogo(containerEl: HTMLElement, className = "docferry-plugin-logo"): HTMLElement {
+  const frame = containerEl.createDiv({ cls: className });
+  frame.createEl("img", {
+    attr: {
+      alt: "",
+      src: DOCFERRY_LOGO_128_DATA_URI,
+      decoding: "async",
+      loading: "lazy"
+    }
+  });
+  return frame;
+}
+
+export function renderDocferryHeader(containerEl: HTMLElement, title: string, description?: string): void {
   const header = containerEl.createDiv({ cls: "docferry-plugin-header" });
-  const logo = header.createDiv({ cls: "docferry-plugin-logo", attr: { "aria-hidden": "true" } });
-  logo.createEl("img", { attr: { alt: "", src: docferryLogoUrl } });
+  appendDocferryLogo(header, "docferry-plugin-logo").setAttr("aria-hidden", "true");
 
   const copy = header.createDiv({ cls: "docferry-plugin-header-copy" });
-  copy.createDiv({ text: title, cls: "docferry-plugin-title", attr: { role: "heading", "aria-level": "2" } });
+  copy.createEl("h2", { text: title });
   if (description) {
     copy.createEl("p", { text: description });
   }
-  return header;
 }

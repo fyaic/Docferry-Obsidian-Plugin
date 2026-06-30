@@ -1,6 +1,5 @@
 import { App, Modal, Notice, Setting } from "obsidian";
 import { renderDocferryHeader } from "./brand";
-import type { Translate } from "./i18n";
 import type { PublishOptions } from "./types";
 
 export interface ShareModalDefaults {
@@ -18,11 +17,7 @@ export class ShareModal extends Modal {
   private password = "";
   private expiresInDays: string;
 
-  constructor(
-    app: App,
-    private readonly defaults: ShareModalDefaults,
-    private readonly t: Translate
-  ) {
+  constructor(app: App, private readonly defaults: ShareModalDefaults) {
     super(app);
     this.title = defaults.title;
     this.passwordEnabled = defaults.passwordEnabled;
@@ -41,11 +36,11 @@ export class ShareModal extends Modal {
     contentEl.empty();
     renderDocferryHeader(
       contentEl,
-      this.defaults.isUpdate ? this.t("modal.share.updateTitle") : this.t("modal.share.publishTitle"),
-      this.t("modal.share.description")
+      this.defaults.isUpdate ? "Update share link" : "Publish share link",
+      "Publish exactly one Obsidian note as a secure DocFerry URL."
     );
 
-    new Setting(contentEl).setName(this.t("modal.share.title")).addText((text) => {
+    new Setting(contentEl).setName("Title").addText((text) => {
       text.setValue(this.title).onChange((value) => {
         this.title = value;
       });
@@ -56,54 +51,54 @@ export class ShareModal extends Modal {
     const renderPassword = () => {
       passwordContainer.empty();
       if (!this.passwordEnabled) return;
-      new Setting(passwordContainer).setName(this.t("modal.share.password")).addText((text) => {
+      new Setting(passwordContainer).setName("Password").addText((text) => {
         text.inputEl.type = "password";
-        text.setPlaceholder(this.t("modal.share.passwordPlaceholder")).onChange((value) => {
+        text.setPlaceholder("Optional password").onChange((value) => {
           this.password = value;
         });
       });
     };
 
     new Setting(contentEl)
-      .setName(this.t("modal.share.passwordProtection"))
-      .setDesc(this.t("modal.share.passwordProtectionDesc"))
-      .addToggle((toggle) => {
+      .setName("Password protection")
+      .setDesc("Protect this share link with a document-level password.")
+      .addToggle((toggle) =>
         toggle.setValue(this.passwordEnabled).onChange((value) => {
           this.passwordEnabled = value;
           renderPassword();
-        });
-      });
+        })
+      );
 
     renderPassword();
 
     new Setting(contentEl)
-      .setName(this.t("modal.share.expires"))
-      .addDropdown((dropdown) => {
+      .setName("Expires")
+      .addDropdown((dropdown) =>
         dropdown
-          .addOption("never", this.t("settings.expiration.never"))
-          .addOption("30", this.t("settings.expiration.thirtyDays"))
+          .addOption("never", "Never")
+          .addOption("30", "30 days")
           .setValue(this.expiresInDays)
           .onChange((value) => {
             this.expiresInDays = value;
-          });
-      });
+          })
+      );
 
     const buttons = contentEl.createDiv({ cls: "modal-button-container" });
-    buttons.createEl("button", { text: this.t("modal.share.cancel") }).addEventListener("click", () => {
+    buttons.createEl("button", { text: "Cancel" }).addEventListener("click", () => {
       this.finish(null);
     });
     const publishButton = buttons.createEl("button", {
-      text: this.defaults.isUpdate ? this.t("modal.share.update") : this.t("modal.share.publish"),
+      text: this.defaults.isUpdate ? "Update" : "Publish",
       cls: "mod-cta"
     });
     publishButton.addEventListener("click", () => {
       const title = this.title.trim();
       if (!title) {
-        new Notice(this.t("modal.share.titleRequired"));
+        new Notice("Title is required.");
         return;
       }
       if (this.passwordEnabled && !this.password.trim()) {
-        new Notice(this.t("modal.share.passwordRequired"));
+        new Notice("Password is required when password protection is enabled.");
         return;
       }
       this.finish({

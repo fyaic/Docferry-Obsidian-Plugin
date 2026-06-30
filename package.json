@@ -1,25 +1,16 @@
 {
-  "name": "docferry-obsidian-plugin",
-  "version": "0.0.14",
-  "description": "Publish one note to a secure DocFerry share link.",
-  "homepage": "https://bondie.io/research/docferry",
-  "license": "MIT",
-  "author": "Bondie Labs",
+  "name": "docferry-release-root",
+  "version": "0.0.15",
+  "private": true,
+  "description": "Root metadata for DocFerry Obsidian plugin release review.",
   "scripts": {
     "build": "npm --prefix plugin run build",
-    "dev": "npm --prefix plugin run dev",
-    "lint": "eslint plugin/src"
+    "check:plugin": "npm --prefix plugin run build && node --check plugin/main.js"
   },
   "devDependencies": {
     "@codemirror/state": "6.5.0",
     "@codemirror/view": "6.38.6",
-    "@types/node": "^20.14.0",
-    "@typescript-eslint/parser": "^8.61.1",
-    "esbuild": "^0.28.1",
-    "eslint": "^9.39.4",
-    "eslint-plugin-obsidianmd": "^0.3.0",
     "obsidian": "1.13.0",
-    "typescript": "^5.4.5",
-    "typescript-eslint": "^8.61.1"
+    "typescript": "^5.4.5"
   }
 }

@@ -43,6 +43,7 @@ export interface SharePayload {
     plugin_id: string;
     plugin_version: string;
     obsidian_version: string;
+    vault_name?: string;
   };
 }
 
@@ -107,8 +108,28 @@ export interface ShareStatusResponse {
   last_published_at: string;
 }
 
+export interface ShareListItemResponse {
+  share_id: string;
+  slug: string;
+  url: string;
+  vault_id?: string | null;
+  vault_name?: string | null;
+  source_path: string;
+  title: string;
+  status: ShareStatus;
+  password_enabled: boolean;
+  expires_at?: string | null;
+  stopped_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  last_published_at: string;
+}
+
 export interface ShareListResponse {
-  shares: ShareStatusResponse[];
+  shares: ShareListItemResponse[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export interface ShareLinkStatusResponse {
@@ -136,14 +157,117 @@ export interface DeleteShareResponse {
 
 export interface AuthConfig {
   provider: string;
+  auth_profile?: string | null;
   login_url: string;
   callback_protocol: string;
+  callback_url?: string | null;
+  product_key?: string | null;
+  synapsehub_base_url?: string | null;
+  auth_config_url?: string | null;
+  distribution_bundle_url?: string | null;
+  account_center_url?: string | null;
+  billing?: BillingConfig | null;
 }
 
 export interface AuthExchangeResponse {
   access_token: string;
+  token_type?: string;
   refresh_token?: string | null;
   expires_at?: string | null;
+  expires_in?: number;
+  product_subject_id?: string;
+  product_key?: string;
+  product_instance_id?: string | null;
+  display_user?: DisplayUser | null;
+}
+
+export interface AuthWhoamiResponse {
+  authenticated: boolean;
+  auth_type: string;
+  owner_id: string;
+  product_subject_id?: string | null;
+  product_key?: string | null;
+  product_instance_id?: string | null;
+  scopes: string[];
+  expires_at?: string | null;
+  display_user?: DisplayUser | null;
+}
+
+export interface DashboardLinkResponse {
+  dashboard_url: string;
+}
+
+export interface DisplayUser {
+  email?: string | null;
+  name?: string | null;
+  picture?: string | null;
+}
+
+export interface BillingPlan {
+  plan_key: string;
+  display_name: string;
+  entitlement_key: string;
+  amount_minor_units: number;
+  currency: string;
+  billing_interval: string;
+  test_only?: boolean;
+  capabilities: string[];
+}
+
+export interface BillingConfig {
+  enabled: boolean;
+  provider: string;
+  default_plan_key: string;
+  plans: BillingPlan[];
+  redirect_origin?: string | null;
+  checkout_endpoint: string;
+  portal_endpoint: string;
+  membership_endpoint: string;
+}
+
+export interface MembershipResponse {
+  authenticated: boolean;
+  product_key: string;
+  product_subject_id: string;
+  source: string;
+  plan_key: string;
+  plan_display_name: string;
+  entitlement_key?: string | null;
+  active_share_count: number;
+  active_share_limit: number;
+  max_single_file_size_bytes: number;
+  can_create_share: boolean;
+  limit_source: string;
+  entitlements: Array<{ key: string; status: string; expires_at?: string | null }>;
+  capabilities: Array<{ key: string; status: string; source_entitlement_key: string }>;
+  feature_gates: Record<string, boolean>;
+  cache: { status: string; ttl_seconds: number };
+  billing: BillingConfig;
+  unavailable_reason?: string | null;
+}
+
+export interface AccessRequestResponse {
+  request_id: string;
+  status: "received";
+  message: string;
+}
+
+export interface BillingCheckoutSessionResponse {
+  redirect_url: string;
+  checkout_session: {
+    product_key?: string | null;
+    plan_key?: string | null;
+    entitlement_key?: string | null;
+    status?: string | null;
+    expires_at?: string | null;
+  };
+}
+
+export interface BillingPortalSessionResponse {
+  redirect_url: string;
+  customer_portal_session: {
+    product_key?: string | null;
+  };
 }
 
 export interface ShareImportAsset {

@@ -1,9 +1,14 @@
 import { requestUrl } from "obsidian";
 import type {
+  AccessRequestResponse,
   AssetResponse,
+  AssetUploadIntentResponse,
   AuthConfig,
   AuthExchangeResponse,
+  AuthWhoamiResponse,
+  DashboardLinkResponse,
   DeleteShareResponse,
+  MembershipResponse,
   SharePayload,
   ShareImportPayloadResponse,
   ShareListResponse,
@@ -11,13 +16,16 @@ import type {
   ShareResponse,
   ShareStatusResponse
 } from "./types";
-import { resolveServiceBaseUrl, type DocferrySettings } from "./settings";
+import type { DocferrySettings } from "./settings";
+
+const COS = require("cos-js-sdk-v5") as typeof import("cos-js-sdk-v5");
 
 interface ErrorEnvelope {
   error?: {
     code?: string;
     message?: string;
     request_id?: string;
+    details?: Record<string, unknown>;
   };
 }
 
@@ -26,29 +34,13 @@ export interface ShareImportSession {
   cookieHeader?: string;
 }
 
-export interface AccountStatusResponse {
-  account: {
-    owner_id: string;
-    mode: "cloud" | "self_host";
-    token_label?: string | null;
-    active_shares: number;
-    active_share_limit: number;
-    remaining_active_shares?: number | null;
-  };
-}
-
-export interface CloudClaimResponse extends AccountStatusResponse {
-  token: string;
-  token_type: "bearer";
-  issued_at: string;
-}
-
 export class ShareApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
     readonly code?: string,
-    readonly requestId?: string
+    readonly requestId?: string,
+    readonly details?: Record<string, unknown>
   ) {
     super(message);
   }
@@ -77,7 +69,7 @@ export class ShareApiClient {
   }
 
   async listShares(): Promise<ShareListResponse> {
-    return this.getJson("/v0/shares");
+    return this.getJson("/v0/shares?limit=100");
   }
 
   async getShareLinks(shareId: string): Promise<ShareLinksResponse> {
@@ -105,22 +97,78 @@ export class ShareApiClient {
     contentType: string,
     contentHash: string
   ): Promise<AssetResponse> {
+    try {
+      const intent = await this.createAssetUploadIntent(data, filename, contentType, contentHash);
+      if (intent.mode === "already_uploaded" && intent.asset) return intent.asset;
+      if (intent.mode === "tencent_cos" && intent.asset_id && intent.storage_key && intent.upload) {
+        await this.uploadAssetToCos(data, contentType, contentHash, intent.upload);
+        return await this.completeAssetUpload(intent.asset_id, {
+          filename,
+          content_type: contentType,
+          byte_length: data.byteLength,
+          hash: contentHash,
+          storage_key: intent.storage_key
+        });
+      }
+    } catch (error) {
+      console.warn("DocFerry direct asset upload failed, falling back to API proxy.", error);
+    }
     return this.uploadAssetViaApi(data, filename, contentType, contentHash);
   }
 
-  async getAccount(): Promise<AccountStatusResponse> {
-    return this.getJson("/v0/account");
+  private async createAssetUploadIntent(
+    data: ArrayBuffer,
+    filename: string,
+    contentType: string,
+    contentHash: string
+  ): Promise<AssetUploadIntentResponse> {
+    return this.postJson("/v0/assets/intents", {
+      filename,
+      content_type: contentType,
+      byte_length: data.byteLength,
+      hash: contentHash
+    });
   }
 
-  async claimCloudToken(installId: string, obsidianVersion: string): Promise<CloudClaimResponse> {
-    return this.postJson("/v0/cloud/claim", {
-      install_id: installId,
-      claim_version: 1,
-      plugin_id: "docferry",
-      plugin_version: this.pluginVersion,
-      obsidian_version: obsidianVersion,
-      client: {
-        platform: "desktop"
+  private async completeAssetUpload(
+    assetId: string,
+    payload: {
+      filename: string;
+      content_type: string;
+      byte_length: number;
+      hash: string;
+      storage_key: string;
+    }
+  ): Promise<AssetResponse> {
+    return this.postJson(`/v0/assets/${encodeURIComponent(assetId)}/complete`, payload);
+  }
+
+  private async uploadAssetToCos(
+    data: ArrayBuffer,
+    contentType: string,
+    contentHash: string,
+    upload: NonNullable<AssetUploadIntentResponse["upload"]>
+  ): Promise<void> {
+    const credentials = upload.credentials;
+    const cos = new COS({
+      SecretId: credentials.tmp_secret_id,
+      SecretKey: credentials.tmp_secret_key,
+      SecurityToken: credentials.session_token,
+      StartTime: credentials.start_time,
+      ExpiredTime: credentials.expired_time
+    });
+    const body = new Blob([data], { type: contentType });
+    await cos.uploadFile({
+      Bucket: upload.bucket,
+      Region: upload.region,
+      Key: upload.key,
+      Body: body,
+      ContentType: contentType,
+      SliceSize: upload.slice_size,
+      Headers: {
+        ...(upload.headers || {}),
+        "Content-Type": contentType,
+        "x-cos-meta-docferry-sha256": contentHash
       }
     });
   }
@@ -150,11 +198,40 @@ export class ShareApiClient {
     return this.getJson("/v0/auth/config");
   }
 
-  async exchangeAuthCode(code: string, redirectUri: string): Promise<AuthExchangeResponse> {
+  async exchangeAuthCode(code: string, redirectUri: string, state?: string): Promise<AuthExchangeResponse> {
     return this.postJson("/v0/auth/exchange", {
       code,
+      state,
       redirect_uri: redirectUri
     });
+  }
+
+  async whoami(): Promise<AuthWhoamiResponse> {
+    return this.getJson("/v0/auth/whoami");
+  }
+
+  async createDashboardLink(targetPath: string): Promise<DashboardLinkResponse> {
+    return this.postJson("/v0/auth/dashboard-link", {
+      target_path: targetPath
+    });
+  }
+
+  async getMembership(refresh = false): Promise<MembershipResponse> {
+    return this.getJson(`/v0/membership${refresh ? "?refresh=true" : ""}`);
+  }
+
+  async createAccessRequest(payload: {
+    source: "plugin_settings" | "plugin_dashboard";
+    requested_access: "higher_limits";
+    current_plan_key?: string | null;
+    active_share_count?: number | null;
+    active_share_limit?: number | null;
+  }): Promise<AccessRequestResponse> {
+    return this.postJson("/v0/access-requests", payload);
+  }
+
+  async logout(): Promise<{ ok: boolean }> {
+    return this.postJson("/v0/auth/logout", {});
   }
 
   async getShareImportPayload(shareUrl: string, password?: string): Promise<ShareImportSession> {
@@ -200,13 +277,7 @@ export class ShareApiClient {
       headers: cookieHeader ? { Cookie: cookieHeader } : {},
       throw: false
     });
-    if (res.status >= 200 && res.status < 300) {
-      const buffer = res.arrayBuffer;
-      if (!(buffer instanceof ArrayBuffer)) {
-        throw new ShareApiError("Asset download returned invalid buffer.", res.status);
-      }
-      return buffer;
-    }
+    if (res.status >= 200 && res.status < 300) return res.arrayBuffer;
     this.parse<never>(res.status, res.text);
     throw new ShareApiError("Asset download failed.", res.status);
   }
@@ -254,7 +325,7 @@ export class ShareApiClient {
   }
 
   private url(path: string): string {
-    const base = resolveServiceBaseUrl(this.getSettings()).replace(/\/+$/, "");
+    const base = this.getSettings().serverUrl.replace(/\/+$/, "");
     return `${base}${path}`;
   }
 
@@ -264,7 +335,8 @@ export class ShareApiClient {
       "X-Share-Plugin-Version": this.pluginVersion
     };
     if (json) headers["Content-Type"] = "application/json";
-    if (settings.apiToken) headers.Authorization = `Bearer ${settings.apiToken}`;
+    const token = settings.authMode === "company-sso" ? settings.sessionToken : settings.manualApiToken || settings.apiToken;
+    if (token) headers.Authorization = `Bearer ${token}`;
     return headers;
   }
 
@@ -272,18 +344,23 @@ export class ShareApiClient {
     let parsed: unknown = undefined;
     if (text) {
       try {
-        parsed = JSON.parse(text) as unknown;
+        parsed = JSON.parse(text);
       } catch {
         parsed = undefined;
       }
     }
 
-    // The generic parse is intentional: callers rely on the API contract.
     if (status >= 200 && status < 300) return parsed as T;
 
-    const error = readErrorEnvelope(parsed);
-    const message = error?.message || text || `Request failed with ${status}`;
-    throw new ShareApiError(message, status, error?.code, error?.request_id);
+    const envelope = parsed as ErrorEnvelope | undefined;
+    const message = envelope?.error?.message || text || `Request failed with ${status}`;
+    throw new ShareApiError(
+      message,
+      status,
+      envelope?.error?.code,
+      envelope?.error?.request_id,
+      envelope?.error?.details
+    );
   }
 }
 
@@ -291,10 +368,11 @@ function safeHeaderValue(value: string): string {
   return encodeURIComponent(value).slice(0, 255);
 }
 
-function parseShareUrl(value: string): { baseUrl: string; slug: string } {
+function parseShareUrl(value: unknown): { baseUrl: string; slug: string } {
+  const raw = typeof value === "string" ? value : "";
   let parsed: URL;
   try {
-    parsed = new URL(value.trim());
+    parsed = new URL(raw.trim());
   } catch {
     throw new ShareApiError("Share URL must include scheme and host.", 0, "invalid_share_url");
   }
@@ -311,25 +389,6 @@ function parseShareUrl(value: string): { baseUrl: string; slug: string } {
 function cookieHeaderFrom(headers: Record<string, string>): string | undefined {
   const value = headers["set-cookie"] || headers["Set-Cookie"];
   if (!value) return undefined;
-  const firstCookie = value.split(",", 1)[0]?.split(";", 1)[0]?.trim();
+  const firstCookie = String(value).split(",", 1)[0]?.split(";", 1)[0]?.trim();
   return firstCookie || undefined;
-}
-
-function readErrorEnvelope(value: unknown): ErrorEnvelope["error"] | undefined {
-  if (!isRecord(value)) return undefined;
-  const error = value.error;
-  if (!isRecord(error)) return undefined;
-  return {
-    code: readOptionalString(error.code),
-    message: readOptionalString(error.message),
-    request_id: readOptionalString(error.request_id)
-  };
-}
-
-function readOptionalString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }

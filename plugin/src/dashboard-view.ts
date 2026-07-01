@@ -168,8 +168,7 @@ export class DocferryDashboardView extends ItemView {
 
     const shortcuts = panel.createDiv({ cls: "docferry-import-shortcuts" });
     this.renderShortcut(shortcuts, "files", "View shares", "Published links.", () => this.openSharesPage());
-    this.renderShortcut(shortcuts, "user", "Account", "Access and profile.", () => this.openAccountPage());
-    this.renderShortcut(shortcuts, "settings", "Config", "Plugin settings.", () => this.host.openSettingsTab());
+    this.renderShortcut(shortcuts, "settings", "Settings", "Plugin settings.", () => this.host.openSettingsTab());
 
     if (!this.importLoading) {
       window.setTimeout(() => input.focus(), 50);
@@ -236,7 +235,7 @@ export class DocferryDashboardView extends ItemView {
       const actions = row.createDiv({ cls: "docferry-share-actions" });
       const copyButton = actions.createEl("button", { attr: { type: "button", "aria-label": "Copy share URL" } });
       appendButtonLabel(copyButton, "copy", "Copy");
-      copyButton.addEventListener("click", async () => {
+      addAsyncClickListener(copyButton, async () => {
         await navigator.clipboard.writeText(share.url);
         new Notice("Share link copied");
       });
@@ -247,13 +246,13 @@ export class DocferryDashboardView extends ItemView {
       });
       const linksButton = actions.createEl("button", { attr: { type: "button", "aria-label": "Show linked note status" } });
       appendButtonLabel(linksButton, "list-checks", "Links");
-      linksButton.addEventListener("click", async () => {
+      addAsyncClickListener(linksButton, async () => {
         await this.host.openShareLinks(share);
       });
       const updateButton = actions.createEl("button", { attr: { type: "button", "aria-label": "Update share" } });
       appendButtonLabel(updateButton, "upload-cloud", "Update");
       updateButton.disabled = share.status === "stopped";
-      updateButton.addEventListener("click", async () => {
+      addAsyncClickListener(updateButton, async () => {
         await this.host.updateShareFromList(share);
       });
       if (share.status === "stopped" || share.status === "expired") {
@@ -264,7 +263,7 @@ export class DocferryDashboardView extends ItemView {
           attr: { type: "button", "aria-label": "Stop sharing" }
         });
         appendButtonLabel(stopButton, "unlink", "Stop sharing");
-        stopButton.addEventListener("click", async () => {
+        addAsyncClickListener(stopButton, async () => {
           await this.host.stopShareFromList(share);
           await this.refreshShares();
         });
@@ -334,7 +333,7 @@ export class DocferryDashboardView extends ItemView {
       const centerButton = center.createEl("button", { cls: "mod-cta", attr: { type: "button" } });
       appendButtonLabel(centerButton, "external-link", "Open billing");
       centerButton.disabled = !this.host.settings.serverUrl || !connected;
-      centerButton.addEventListener("click", async () => {
+      addAsyncClickListener(centerButton, async () => {
         await this.host.openMembershipCenter();
       });
     }
@@ -350,7 +349,7 @@ export class DocferryDashboardView extends ItemView {
     const requestButton = requestPanel.createEl("button", { cls: "mod-cta", attr: { type: "button" } });
     appendButtonLabel(requestButton, "send", "Request access");
     requestButton.disabled = !connected || this.host.settings.authMode !== "company-sso";
-    requestButton.addEventListener("click", async () => {
+    addAsyncClickListener(requestButton, async () => {
       await this.host.requestAccessUpgrade("plugin_dashboard");
       this.render();
     });
@@ -359,7 +358,7 @@ export class DocferryDashboardView extends ItemView {
     if (this.host.settings.authMode === "company-sso") {
       const refreshButton = actions.createEl("button", { cls: "mod-cta", attr: { type: "button" } });
       appendButtonLabel(refreshButton, connected ? "refresh-cw" : "log-in", connected ? "Refresh account" : "Connect");
-      refreshButton.addEventListener("click", async () => {
+      addAsyncClickListener(refreshButton, async () => {
         if (connected) {
           await this.host.refreshMembership(true);
         } else {
@@ -542,6 +541,12 @@ function appendButtonLabel(button: HTMLButtonElement, icon: string, text: string
   const iconEl = button.createSpan({ cls: "docferry-button-icon", attr: { "aria-hidden": "true" } });
   setIcon(iconEl, icon);
   button.createSpan({ text, cls: "docferry-button-label" });
+}
+
+function addAsyncClickListener(button: HTMLElement, handler: () => Promise<void>): void {
+  button.addEventListener("click", () => {
+    void handler();
+  });
 }
 
 function renderMembershipStat(containerEl: HTMLElement, label: string, value: string): void {

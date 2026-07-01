@@ -1,7 +1,7 @@
 {
   "name": "docferry",
-  "version": "0.0.16",
-  "description": "Obsidian plugin for publishing one note to a secure DocFerry share link.",
+  "version": "0.0.17",
+  "description": "Publish one note to a secure DocFerry share link.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
@@ -14,7 +14,7 @@
     "markdown"
   ],
   "author": "Fuyonder",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.14.0",
     "esbuild": "^0.25.12",

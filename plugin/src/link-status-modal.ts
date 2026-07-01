@@ -32,19 +32,19 @@ export class LinkStatusModal extends Modal {
         .setName(`${statusLabel(link.status)} ${link.label || link.raw_target}`)
         .setDesc(statusDescription(link));
 
-      if (link.target_url) {
+      const targetUrl = link.target_url;
+      if (targetUrl) {
         setting
-          .addButton((button) =>
-            button.setButtonText("Copy").onClick(async () => {
-              await navigator.clipboard.writeText(link.target_url || "");
-              new Notice("Target link copied");
-            })
-          )
-          .addButton((button) =>
+          .addButton((button) => {
+            button.setButtonText("Copy").onClick(() => {
+              void copyTargetLink(targetUrl);
+            });
+          })
+          .addButton((button) => {
             button.setButtonText("Open").onClick(() => {
-              window.open(link.target_url || "");
-            })
-          );
+              window.open(targetUrl);
+            });
+          });
       }
     }
 
@@ -53,6 +53,11 @@ export class LinkStatusModal extends Modal {
       this.close();
     });
   }
+}
+
+async function copyTargetLink(targetUrl: string): Promise<void> {
+  await navigator.clipboard.writeText(targetUrl);
+  new Notice("Target link copied");
 }
 
 function statusLabel(status: ShareLinkStatusResponse["status"]): string {

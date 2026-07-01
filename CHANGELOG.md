@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.17
+
+- Address Obsidian Community review feedback around license, description, release assets, async click callbacks, settings render calls, CSS overrides, and privacy copy.
+- Refresh the DocFerry main view, settings import panel, and share completion modal without changing publish/import/server behavior.
+
 ## 0.0.16
 
 - Prepare the June 30 public free launch plugin for stricter Obsidian review.

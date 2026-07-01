@@ -724,10 +724,10 @@
   align-items: center;
   -webkit-appearance: none;
   appearance: none;
-  background: transparent !important;
-  border: 0 !important;
+  background: transparent;
+  border: 0;
   border-radius: var(--df-radius);
-  box-shadow: none !important;
+  box-shadow: none;
   color: var(--df-text);
   cursor: pointer;
   display: inline-flex;
@@ -739,14 +739,14 @@
 }
 
 .docferry-workspace-brand:hover {
-  background: transparent !important;
-  box-shadow: none !important;
+  background: transparent;
+  box-shadow: none;
 }
 
 .docferry-workspace-brand:focus,
 .docferry-workspace-brand:focus-visible {
-  background: transparent !important;
-  box-shadow: none !important;
+  background: transparent;
+  box-shadow: none;
   outline: 1px solid var(--df-border);
   outline-offset: 4px;
 }
@@ -754,10 +754,10 @@
 .docferry-workspace-brand-mark,
 .docferry-import-mark {
   align-items: center;
-  background: transparent !important;
-  border: 0 !important;
+  background: transparent;
+  border: 0;
   border-radius: 0;
-  box-shadow: none !important;
+  box-shadow: none;
   color: var(--df-accent-text);
   display: inline-flex;
   flex: 0 0 auto;
@@ -834,8 +834,8 @@
 }
 
 .docferry-import-logo {
-  background: transparent !important;
-  border: 0 !important;
+  background: transparent;
+  border: 0;
   box-shadow: none;
 }
 
@@ -1314,3 +1314,799 @@
     width: 100%;
   }
 }
+
+/* Friendly DocFerry UI skin: visual-only overrides, no behavior or endpoints. */
+.docferry-settings-tab,
+.docferry-dashboard-view,
+.docferry-result-modal,
+.docferry-upload-consent-modal {
+  --df-brand-blue: #5778bf;
+  --df-brand-ink: #344b7a;
+  --df-brand-gold: #e7a947;
+  --df-brand-mint: #68a99d;
+  --df-soft-blue: color-mix(in srgb, var(--df-brand-blue) 11%, var(--background-primary));
+  --df-soft-gold: color-mix(in srgb, var(--df-brand-gold) 14%, var(--background-primary));
+  --df-soft-mint: color-mix(in srgb, var(--df-brand-mint) 12%, var(--background-primary));
+  --df-soft-surface: color-mix(in srgb, var(--background-secondary) 68%, var(--background-primary));
+  --df-line-soft: color-mix(in srgb, var(--background-modifier-border) 72%, var(--df-brand-blue));
+  --df-logo-wash: color-mix(in srgb, var(--df-brand-gold) 12%, var(--background-secondary));
+  --df-focus-ring: color-mix(in srgb, var(--df-brand-blue) 45%, transparent);
+}
+
+.theme-dark .docferry-settings-tab,
+.theme-dark .docferry-dashboard-view,
+.theme-dark .docferry-result-modal,
+.theme-dark .docferry-upload-consent-modal {
+  --df-soft-blue: color-mix(in srgb, var(--df-brand-blue) 18%, var(--background-primary));
+  --df-soft-gold: color-mix(in srgb, var(--df-brand-gold) 16%, var(--background-primary));
+  --df-soft-mint: color-mix(in srgb, var(--df-brand-mint) 14%, var(--background-primary));
+  --df-soft-surface: color-mix(in srgb, var(--background-secondary) 72%, var(--background-primary));
+  --df-line-soft: color-mix(in srgb, var(--background-modifier-border) 82%, var(--df-brand-blue));
+  --df-logo-wash: color-mix(in srgb, var(--df-brand-gold) 10%, var(--background-secondary));
+}
+
+.docferry-dashboard-view {
+  --df-background: var(--background-primary);
+  --df-panel-background: var(--background-primary);
+  --df-radius: 8px;
+  --df-shadow: none;
+  background: var(--background-primary);
+}
+
+.docferry-dashboard-view::before,
+.docferry-dashboard-view::after {
+  display: none;
+}
+
+.docferry-heading {
+  color: var(--text-normal);
+  font-weight: var(--font-semibold);
+  letter-spacing: 0;
+}
+
+.docferry-heading-2 {
+  font-size: 1.35rem;
+}
+
+.docferry-heading-3 {
+  font-size: 1.08rem;
+}
+
+.docferry-heading-4 {
+  font-size: 0.98rem;
+}
+
+.docferry-workspace-shell {
+  max-width: 940px;
+  padding: 18px 20px;
+}
+
+.docferry-workspace-topbar {
+  border-bottom-color: var(--df-line-soft);
+  margin-bottom: 10px;
+  padding-bottom: 12px;
+}
+
+.docferry-workspace-brand {
+  border-radius: 8px;
+  min-width: 0;
+  padding: 3px 6px 3px 0;
+}
+
+.docferry-workspace-brand:hover {
+  background: transparent;
+  color: var(--text-normal);
+}
+
+.docferry-workspace-brand:focus,
+.docferry-workspace-brand:focus-visible,
+.docferry-settings-nav-button:focus,
+.docferry-settings-nav-button:focus-visible,
+.docferry-import-shortcut:focus,
+.docferry-import-shortcut:focus-visible {
+  box-shadow: 0 0 0 2px var(--df-focus-ring);
+  outline: none;
+}
+
+.docferry-workspace-brand-title {
+  color: var(--text-normal);
+  font-size: 0.98rem;
+  font-weight: 700;
+}
+
+.docferry-workspace-brand-subtitle {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.docferry-import-home {
+  justify-content: flex-start;
+  padding: 30px 0 20px;
+}
+
+.docferry-import-panel {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: var(--background-primary);
+  border-color: var(--df-line-soft);
+  box-shadow: none;
+  max-width: 640px;
+  padding: 22px;
+  width: min(100%, 640px);
+}
+
+.docferry-import-panel .docferry-heading-2 {
+  color: var(--text-normal);
+  font-size: 1.45rem;
+  line-height: 1.18;
+}
+
+.docferry-import-panel > p,
+.docferry-workspace-page-copy p,
+.docferry-dashboard-section-header p,
+.docferry-panel-header p {
+  color: var(--text-muted);
+  line-height: 1.42;
+}
+
+.docferry-import-row,
+.docferry-dashboard-input-row {
+  gap: 8px;
+}
+
+.docferry-import-url-input,
+.docferry-dashboard-input,
+.docferry-settings-tab .setting-item-control input[type="text"],
+.docferry-settings-tab .setting-item-control input[type="password"],
+.docferry-settings-tab .setting-item-control select {
+  border-color: var(--df-line-soft);
+  border-radius: 7px;
+}
+
+.docferry-import-shortcuts {
+  border-top-color: var(--df-line-soft);
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 12px;
+}
+
+.docferry-import-shortcut {
+  background: var(--df-soft-surface);
+  border-color: var(--df-line-soft);
+  border-radius: 8px;
+  min-height: 58px;
+  padding: 10px;
+}
+
+.docferry-import-shortcut:hover {
+  background: var(--df-soft-blue);
+  border-color: color-mix(in srgb, var(--df-brand-blue) 34%, var(--background-modifier-border));
+}
+
+.docferry-import-shortcut-icon {
+  color: var(--df-brand-blue);
+}
+
+.docferry-import-shortcut-title {
+  color: var(--text-normal);
+  font-weight: var(--font-semibold);
+}
+
+.docferry-settings-tab {
+  max-width: 980px;
+}
+
+.docferry-settings-layout {
+  gap: 14px;
+  grid-template-columns: 158px minmax(0, 1fr);
+}
+
+.docferry-settings-nav {
+  background: transparent;
+  border: 0;
+  gap: 4px;
+  padding: 0;
+}
+
+.docferry-settings-nav-button {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-weight: var(--font-medium);
+  min-height: 34px;
+  padding: 6px 8px;
+}
+
+.docferry-settings-nav-button:hover,
+.docferry-settings-nav-button.is-active {
+  background: var(--df-soft-blue);
+  border-color: var(--df-line-soft);
+  color: var(--text-normal);
+}
+
+.docferry-settings-nav-icon {
+  color: var(--df-brand-blue);
+  height: 17px;
+  width: 17px;
+}
+
+.docferry-settings-body {
+  gap: 12px;
+}
+
+.docferry-settings-panel,
+.docferry-dashboard-section,
+.docferry-account-card,
+.docferry-membership-card,
+.docferry-account-request-panel,
+.docferry-access-request-card,
+.docferry-share-row,
+.docferry-workspace-share-row,
+.docferry-import-details,
+.docferry-membership-center,
+.docferry-settings-empty,
+.docferry-dashboard-inline-error,
+.docferry-dashboard-inline-success {
+  border-color: var(--df-line-soft);
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.docferry-settings-panel,
+.docferry-dashboard-section {
+  background: var(--background-primary);
+  padding: 14px;
+}
+
+.docferry-panel-header,
+.docferry-dashboard-section-header,
+.docferry-workspace-page-header {
+  margin-bottom: 12px;
+}
+
+.docferry-account-card,
+.docferry-membership-card,
+.docferry-account-request-panel,
+.docferry-access-request-card,
+.docferry-import-details,
+.docferry-settings-empty,
+.docferry-dashboard-inline-error,
+.docferry-dashboard-inline-success {
+  background: var(--df-soft-surface);
+}
+
+.docferry-membership-stats {
+  gap: 8px;
+}
+
+.docferry-membership-stat {
+  background: var(--background-primary);
+  border-color: var(--df-line-soft);
+  border-radius: 8px;
+}
+
+.docferry-account-request-panel {
+  border-left: 3px solid var(--df-brand-gold);
+}
+
+.docferry-share-row,
+.docferry-workspace-share-row {
+  background: var(--background-primary);
+  gap: 10px;
+  padding: 11px;
+}
+
+.docferry-settings-body .docferry-share-row {
+  background: var(--background-primary);
+}
+
+.docferry-share-main .docferry-heading-4,
+.docferry-account-details .docferry-heading-4,
+.docferry-membership-header .docferry-heading-4 {
+  font-weight: var(--font-semibold);
+}
+
+.docferry-share-meta,
+.docferry-share-main p,
+.docferry-account-details p,
+.docferry-membership-note {
+  color: var(--text-muted);
+}
+
+.docferry-status-badge,
+.docferry-pill {
+  background: var(--background-primary);
+  border-color: var(--df-line-soft);
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: var(--font-medium);
+  min-height: 23px;
+  padding: 4px 8px;
+}
+
+.docferry-status-badge.is-ok,
+.docferry-pill.is-ok {
+  background: var(--df-soft-mint);
+  border-color: color-mix(in srgb, var(--df-brand-mint) 42%, var(--background-modifier-border));
+  color: var(--text-success);
+}
+
+.docferry-pill.is-locked {
+  background: var(--df-soft-blue);
+  border-color: color-mix(in srgb, var(--df-brand-blue) 34%, var(--background-modifier-border));
+  color: var(--text-accent);
+}
+
+.docferry-pill.is-warning {
+  background: var(--df-soft-gold);
+  border-color: color-mix(in srgb, var(--df-brand-gold) 42%, var(--background-modifier-border));
+  color: var(--text-warning);
+}
+
+.docferry-workspace-page-header button,
+.docferry-workspace-page-actions button,
+.docferry-import-row button,
+.docferry-import-actions button,
+.docferry-dashboard-toolbar button,
+.docferry-dashboard-actions button,
+.docferry-share-actions button,
+.docferry-panel-header button,
+.docferry-settings-actions button,
+.docferry-dashboard-input-row button,
+.docferry-account-request-panel button,
+.docferry-membership-center button {
+  border-radius: 8px;
+  min-height: 30px;
+}
+
+.docferry-stop-share-button {
+  color: var(--text-error);
+}
+
+.docferry-dashboard-shell {
+  max-width: 980px;
+  padding: 14px 0;
+}
+
+.docferry-dashboard-toolbar {
+  margin: 0 0 12px;
+}
+
+.docferry-dashboard-grid {
+  gap: 12px;
+  grid-template-columns: minmax(235px, 0.34fr) minmax(0, 1fr);
+}
+
+.docferry-dashboard-side,
+.docferry-dashboard-main {
+  gap: 12px;
+}
+
+.docferry-dashboard-account-card {
+  background: var(--df-soft-surface);
+  padding: 12px;
+}
+
+.docferry-dashboard-share-row {
+  background: var(--background-primary);
+}
+
+.docferry-skeleton-line {
+  background: linear-gradient(
+    90deg,
+    var(--background-secondary) 0%,
+    var(--df-soft-blue) 45%,
+    var(--background-secondary) 100%
+  );
+}
+
+.docferry-consent-header {
+  gap: 12px;
+}
+
+.docferry-consent-details {
+  background: var(--df-soft-surface);
+  border-color: var(--df-line-soft);
+  border-radius: 8px;
+}
+
+@media (max-width: 760px) {
+  .docferry-settings-layout,
+  .docferry-dashboard-grid,
+  .docferry-import-row,
+  .docferry-dashboard-input-row {
+    grid-template-columns: 1fr;
+  }
+
+  .docferry-settings-nav {
+    border-bottom: 1px solid var(--df-line-soft);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-bottom: 10px;
+  }
+
+  .docferry-workspace-shell {
+    padding: 14px;
+  }
+
+  .docferry-import-panel {
+    padding: 18px;
+  }
+}
+
+/* Keep the crayon logo as a raw transparent asset, never as a badged tile. */
+.docferry-plugin-logo,
+.docferry-workspace-brand-mark,
+.docferry-import-mark,
+.docferry-consent-logo {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  display: contents;
+  height: auto;
+  overflow: visible;
+  padding: 0;
+  width: auto;
+}
+
+.docferry-plugin-logo img,
+.docferry-workspace-brand-mark img,
+.docferry-import-logo img,
+.docferry-consent-logo img {
+  background: none;
+  border: 0;
+  box-shadow: none;
+  display: block;
+  filter: drop-shadow(0 2px 3px color-mix(in srgb, var(--text-normal) 16%, transparent));
+  object-fit: contain;
+}
+
+.docferry-plugin-logo img {
+  height: 58px;
+  width: 58px;
+}
+
+.docferry-workspace-brand-mark img {
+  height: 44px;
+  width: 44px;
+}
+
+.docferry-import-logo img,
+.docferry-consent-logo img {
+  height: 68px;
+  margin-bottom: 12px;
+  width: 68px;
+}
+
+.docferry-import-shortcut,
+.docferry-settings-nav-button {
+  background-color: transparent;
+}
+
+.docferry-import-shortcut {
+  background: var(--df-soft-surface);
+  border-color: var(--df-line-soft);
+  color: var(--text-normal);
+}
+
+.docferry-import-shortcut:hover {
+  background: var(--df-soft-blue);
+  border-color: color-mix(in srgb, var(--df-brand-blue) 34%, var(--background-modifier-border));
+}
+
+.docferry-settings-nav-button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.docferry-settings-nav-button:hover,
+.docferry-settings-nav-button.is-active {
+  background: var(--df-soft-blue);
+  border-color: var(--df-line-soft);
+  color: var(--text-normal);
+}
+
+/* 2026-07 UI direction: calm main view, centered raw logo, no duplicate page brand. */
+.docferry-dashboard-view {
+  --df-background: var(--background-primary);
+  --df-panel-background: color-mix(in srgb, var(--background-primary) 94%, var(--background-secondary));
+  --df-soft-surface: color-mix(in srgb, var(--background-secondary) 42%, var(--background-primary));
+  --df-line-soft: color-mix(in srgb, var(--background-modifier-border) 84%, var(--df-brand-blue));
+  background: var(--background-primary);
+}
+
+.docferry-workspace-topbar {
+  display: none;
+}
+
+.docferry-workspace-shell {
+  max-width: 900px;
+  padding: clamp(22px, 4vw, 44px) 20px;
+}
+
+.docferry-import-home {
+  justify-content: flex-start;
+  padding: clamp(28px, 8vh, 76px) 0 24px;
+}
+
+.docferry-import-home > .docferry-import-panel {
+  background: var(--df-panel-background);
+  border: 1px solid var(--df-line-soft);
+  box-shadow: none;
+  max-width: 680px;
+  padding: clamp(28px, 4vw, 40px);
+  text-align: center;
+}
+
+.docferry-import-home > .docferry-import-panel .docferry-import-logo img {
+  height: clamp(96px, 12vw, 128px);
+  margin: 0 auto 14px;
+  width: clamp(96px, 12vw, 128px);
+}
+
+.docferry-import-home > .docferry-import-panel .docferry-heading-2 {
+  font-size: clamp(1.5rem, 2.5vw, 1.9rem);
+  margin: 0 auto;
+  text-align: center;
+}
+
+.docferry-import-home > .docferry-import-panel > p {
+  margin: 10px auto 22px;
+  max-width: 34rem;
+  text-align: center;
+}
+
+.docferry-import-home > .docferry-import-panel .docferry-import-field {
+  margin: 0 auto;
+  max-width: 42rem;
+  text-align: left;
+}
+
+.docferry-import-home > .docferry-import-panel .docferry-import-shortcuts {
+  grid-template-columns: repeat(2, minmax(11rem, 15rem));
+  justify-content: center;
+  max-width: 34rem;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.docferry-import-shortcut {
+  background: color-mix(in srgb, var(--background-secondary) 46%, var(--background-primary));
+}
+
+.docferry-plugin-header {
+  border-bottom-color: var(--df-line-soft);
+}
+
+.docferry-plugin-logo img {
+  height: 64px;
+  width: 64px;
+}
+
+.docferry-consent-logo img {
+  height: 84px;
+  width: 84px;
+}
+
+/* Keep dashboard sub-pages on the same centered stage as the import view. */
+.docferry-workspace-content {
+  align-content: start;
+  justify-items: center;
+}
+
+.docferry-workspace-page {
+  box-sizing: border-box;
+  gap: 14px;
+  margin: 0 auto;
+  max-width: 680px;
+  padding: clamp(28px, 8vh, 76px) 0 24px;
+  width: min(100%, 680px);
+}
+
+.docferry-workspace-page-header {
+  align-items: start;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr) 110px;
+  min-height: 104px;
+  width: 100%;
+}
+
+.docferry-workspace-page-header .docferry-workspace-back {
+  justify-self: start;
+}
+
+.docferry-workspace-page-header > button:last-child {
+  justify-self: end;
+}
+
+.docferry-workspace-page-copy {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  min-height: 76px;
+  text-align: center;
+}
+
+.docferry-workspace-page-copy .docferry-heading-2 {
+  font-size: clamp(1.45rem, 2.4vw, 1.8rem);
+  line-height: 1.18;
+  margin: 0;
+}
+
+.docferry-workspace-page-copy p {
+  margin: 8px auto 0;
+  max-width: 32rem;
+}
+
+.docferry-workspace-share-list,
+.docferry-workspace-account-card,
+.docferry-workspace-membership-card,
+.docferry-account-page .docferry-account-request-panel,
+.docferry-workspace-page-actions,
+.docferry-settings-empty {
+  justify-self: center;
+  max-width: 680px;
+  width: 100%;
+}
+
+.docferry-workspace-page-actions {
+  justify-content: center;
+}
+
+@media (max-width: 760px) {
+  .docferry-workspace-page {
+    padding: 24px 0 18px;
+  }
+
+  .docferry-workspace-page-header {
+    grid-template-columns: 1fr;
+    min-height: 132px;
+  }
+
+  .docferry-workspace-page-header .docferry-workspace-back,
+  .docferry-workspace-page-header > button:last-child {
+    justify-self: center;
+  }
+
+  .docferry-import-home > .docferry-import-panel .docferry-import-shortcuts {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 22rem;
+  }
+}
+
+/* Settings import stays practical and roomy; the large hero-like import card is only for the main view. */
+.docferry-settings-tab .docferry-import-panel {
+  max-width: none;
+  padding: 16px;
+  text-align: left;
+  width: 100%;
+}
+
+.docferry-settings-tab .docferry-import-panel .docferry-panel-header {
+  margin-bottom: 16px;
+}
+
+.docferry-settings-tab .docferry-import-form {
+  align-items: start;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr;
+}
+
+.docferry-settings-tab .docferry-import-input {
+  max-width: 44rem;
+  min-height: 38px;
+}
+
+.docferry-settings-tab .docferry-import-actions {
+  justify-content: flex-start;
+}
+
+.docferry-settings-tab .docferry-import-actions button {
+  min-height: 30px;
+}
+
+.docferry-settings-tab .docferry-import-details {
+  border-top: 1px solid var(--df-line-soft);
+  color: var(--text-muted);
+  gap: 8px 14px;
+  line-height: 1.4;
+  margin-top: 16px;
+  padding-top: 10px;
+}
+
+/* Share completion modal: calmer than Obsidian's default Setting rows, without changing share behavior. */
+.docferry-result-modal {
+  display: grid;
+  gap: 14px;
+}
+
+.docferry-result-modal .docferry-plugin-header {
+  border-bottom-color: var(--df-line-soft);
+  margin-bottom: 0;
+  padding-bottom: 14px;
+}
+
+.docferry-result-card {
+  background: color-mix(in srgb, var(--background-secondary) 38%, var(--background-primary));
+  border: 1px solid var(--df-line-soft);
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.docferry-result-title-block,
+.docferry-result-link {
+  display: grid;
+  gap: 6px;
+}
+
+.docferry-result-label {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: var(--font-semibold);
+  line-height: 1.2;
+}
+
+.docferry-result-title {
+  overflow-wrap: anywhere;
+}
+
+.docferry-result-link {
+  background: var(--background-primary);
+  border: 1px solid var(--df-line-soft);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.docferry-result-link code {
+  background: transparent;
+  border: 0;
+  color: var(--text-normal);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  padding: 0;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.docferry-result-meta {
+  border-top: 1px solid var(--df-line-soft);
+  color: var(--text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  gap: 8px 14px;
+  justify-content: space-between;
+  line-height: 1.35;
+  padding-top: 10px;
+}
+
+.docferry-result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 0;
+}
+
+.docferry-result-actions button {
+  align-items: center;
+  border-radius: 8px;
+  display: inline-flex;
+  gap: 6px;
+  justify-content: center;
+  min-height: 32px;
+}
+
+@media (max-width: 520px) {
+  .docferry-result-actions button {
+    flex: 1 1 100%;
+  }
+}
+

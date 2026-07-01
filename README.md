@@ -10,7 +10,7 @@ DocFerry does not publish an entire folder, vault, digital garden, or public dir
 
 ## Current Release
 
-- Obsidian plugin version: `0.0.16`
+- Obsidian plugin version: `0.0.17`
 - Hosted service: `https://docferry.fuyonder.tech`
 - Public account system: Fuyonder account
 - Public billing: disabled in this release
@@ -50,7 +50,7 @@ main.js
 styles.css
 ```
 
-The release also provides a zip package for manual installation.
+GitHub releases should attach only the assets that Obsidian downloads: `manifest.json`, `main.js`, and `styles.css`.
 
 ## Build
 

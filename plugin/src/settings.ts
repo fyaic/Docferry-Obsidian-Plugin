@@ -112,6 +112,10 @@ export class DocferrySettingTab extends PluginSettingTab {
   }
 
   display(): void {
+    this.render();
+  }
+
+  private render(): void {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass("docferry-settings-tab");
@@ -130,12 +134,12 @@ export class DocferrySettingTab extends PluginSettingTab {
   refreshForAuthChange(): void {
     this.activeSection = "account";
     this.resetShareList();
-    this.display();
+    this.render();
   }
 
   refreshForShareChange(): void {
     this.resetShareList();
-    if (this.activeSection === "shares") this.display();
+    if (this.activeSection === "shares") this.render();
   }
 
   private renderNavigation(containerEl: HTMLElement): void {
@@ -155,7 +159,7 @@ export class DocferrySettingTab extends PluginSettingTab {
       if (this.activeSection === section.id) button.addClass("is-active");
       button.addEventListener("click", () => {
         this.activeSection = section.id;
-        this.display();
+        this.render();
       });
     }
   }
@@ -200,27 +204,27 @@ export class DocferrySettingTab extends PluginSettingTab {
         cls: "mod-cta",
         attr: { type: "button" }
       });
-      connectButton.addEventListener("click", async () => {
+      addAsyncClickListener(connectButton, async () => {
         if (account) {
           await this.host.refreshMembership(true);
-          this.display();
+          this.render();
         } else {
           await this.host.startLogin();
         }
       });
     }
     const testButton = actions.createEl("button", { text: "Test connection", attr: { type: "button" } });
-    testButton.addEventListener("click", async () => {
+    addAsyncClickListener(testButton, async () => {
       await this.host.testConnection();
-      this.display();
+      this.render();
     });
     if (this.host.settings.authMode === "company-sso") {
       const disconnectButton = actions.createEl("button", { text: "Disconnect", attr: { type: "button" } });
       disconnectButton.disabled = !account && !this.host.settings.sessionToken;
-      disconnectButton.addEventListener("click", async () => {
+      addAsyncClickListener(disconnectButton, async () => {
         await this.host.disconnectAccount();
         this.resetShareList();
-        this.display();
+        this.render();
       });
     }
     status.setAttr("aria-label", account ? "Connected" : "Current account status");
@@ -264,7 +268,7 @@ export class DocferrySettingTab extends PluginSettingTab {
         attr: { type: "button" }
       });
       centerButton.disabled = !this.host.settings.serverUrl || !connected;
-      centerButton.addEventListener("click", async () => {
+      addAsyncClickListener(centerButton, async () => {
         await this.host.openMembershipCenter();
       });
     }
@@ -283,9 +287,9 @@ export class DocferrySettingTab extends PluginSettingTab {
     });
     const requestButton = panel.createEl("button", { text: "Request access", cls: "mod-cta", attr: { type: "button" } });
     requestButton.disabled = !connected;
-    requestButton.addEventListener("click", async () => {
+    addAsyncClickListener(requestButton, async () => {
       await this.host.requestAccessUpgrade("plugin_settings");
-      this.display();
+      this.render();
     });
   }
 
@@ -359,7 +363,7 @@ export class DocferrySettingTab extends PluginSettingTab {
 
       const actions = row.createDiv({ cls: "docferry-share-actions" });
       const copyButton = actions.createEl("button", { text: "Copy", attr: { type: "button" } });
-      copyButton.addEventListener("click", async () => {
+      addAsyncClickListener(copyButton, async () => {
         await navigator.clipboard.writeText(share.url);
         new Notice("Share link copied");
       });
@@ -369,7 +373,7 @@ export class DocferrySettingTab extends PluginSettingTab {
       });
       const updateButton = actions.createEl("button", { text: "Update", attr: { type: "button" } });
       updateButton.disabled = share.status === "stopped";
-      updateButton.addEventListener("click", async () => {
+      addAsyncClickListener(updateButton, async () => {
         await this.host.updateShareFromList(share);
       });
       if (share.status === "stopped" || share.status === "expired") {
@@ -380,7 +384,7 @@ export class DocferrySettingTab extends PluginSettingTab {
           attr: { type: "button", "aria-label": `Stop sharing ${share.title || share.source_path}` }
         });
         appendButtonLabel(stopButton, "unlink", "Stop sharing");
-        stopButton.addEventListener("click", async () => {
+        addAsyncClickListener(stopButton, async () => {
           await this.host.stopShareFromList(share);
           await this.refreshShares();
         });
@@ -408,14 +412,14 @@ export class DocferrySettingTab extends PluginSettingTab {
 
     const actions = form.createDiv({ cls: "docferry-import-actions" });
     const importButton = actions.createEl("button", { text: "Import URL", cls: "mod-cta", attr: { type: "button" } });
-    importButton.addEventListener("click", async () => {
+    addAsyncClickListener(importButton, async () => {
       await this.host.importShareUrl(shareUrl);
       input.value = "";
       shareUrl = "";
     });
 
     const dialogButton = actions.createEl("button", { text: "Open dialog", attr: { type: "button" } });
-    dialogButton.addEventListener("click", async () => {
+    addAsyncClickListener(dialogButton, async () => {
       await this.host.importShareUrl();
     });
 
@@ -439,7 +443,7 @@ export class DocferrySettingTab extends PluginSettingTab {
     this.shareListLoading = true;
     this.shareError = "";
     this.shareListKey = this.currentShareListKey();
-    this.display();
+    this.render();
     try {
       this.shares = await this.host.listShares();
       this.shareListLoaded = true;
@@ -448,7 +452,7 @@ export class DocferrySettingTab extends PluginSettingTab {
       this.shares = [];
     } finally {
       this.shareListLoading = false;
-      this.display();
+      this.render();
     }
   }
 
@@ -510,7 +514,7 @@ export class DocferrySettingTab extends PluginSettingTab {
             .onChange(async (value) => {
               this.host.settings.authMode = value as AuthMode;
               await this.host.saveSettings();
-              this.display();
+              this.render();
             })
         );
     } else {
@@ -520,10 +524,8 @@ export class DocferrySettingTab extends PluginSettingTab {
         .addButton((button) => {
           button.setButtonText("Connect");
           button.setCta();
-          button.onClick(async () => {
-            this.host.settings.authMode = "company-sso";
-            await this.host.saveSettings();
-            await this.host.startLogin();
+          button.onClick(() => {
+            void this.startCompanySignIn();
           });
         });
     }
@@ -614,6 +616,12 @@ export class DocferrySettingTab extends PluginSettingTab {
           new Notice(value ? "Debug logging enabled" : "Debug logging disabled");
         })
       );
+  }
+
+  private async startCompanySignIn(): Promise<void> {
+    this.host.settings.authMode = "company-sso";
+    await this.host.saveSettings();
+    await this.host.startLogin();
   }
 }
 
@@ -775,4 +783,10 @@ function appendButtonLabel(button: HTMLElement, iconName: string, label: string)
   const icon = button.createSpan({ cls: "docferry-button-icon", attr: { "aria-hidden": "true" } });
   setIcon(icon, iconName);
   button.createSpan({ text: label, cls: "docferry-button-label" });
+}
+
+function addAsyncClickListener(button: HTMLElement, handler: () => Promise<void>): void {
+  button.addEventListener("click", () => {
+    void handler();
+  });
 }

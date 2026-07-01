@@ -1,4 +1,4 @@
-import { App, Modal, Notice, Setting } from "obsidian";
+import { App, Modal, Notice, setIcon } from "obsidian";
 import { renderDocferryHeader } from "./brand";
 
 export class ResultModal extends Modal {
@@ -14,29 +14,51 @@ export class ResultModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
-    renderDocferryHeader(contentEl, "Share link ready", "This URL opens only the published document.");
-    contentEl.createEl("p", { text: this.title, cls: "setting-item-description" });
+    contentEl.addClass("docferry-result-modal");
 
-    new Setting(contentEl)
-      .setName("URL")
-      .setDesc(this.url)
-      .addButton((button) =>
-        button.setButtonText("Copy").onClick(async () => {
-          await navigator.clipboard.writeText(this.url);
-          new Notice("Link copied");
-        })
-      )
-      .addButton((button) =>
-        button.setButtonText("Open").onClick(() => {
-          window.open(this.url);
-        })
-      );
+    renderDocferryHeader(contentEl, "Share link ready", "Your published document is ready to open or copy.");
 
-    new Setting(contentEl).setName("Updated").setDesc(this.updatedAt);
+    const card = contentEl.createDiv({ cls: "docferry-result-card" });
+    const titleBlock = card.createDiv({ cls: "docferry-result-title-block" });
+    titleBlock.createSpan({ text: "Published note", cls: "docferry-result-label" });
+    titleBlock.createDiv({ text: this.title, cls: "docferry-heading docferry-heading-3 docferry-result-title" });
 
-    const buttons = contentEl.createDiv({ cls: "modal-button-container" });
-    buttons.createEl("button", { text: "Done", cls: "mod-cta" }).addEventListener("click", () => {
+    const linkBlock = card.createDiv({ cls: "docferry-result-link" });
+    linkBlock.createSpan({ text: "Share URL", cls: "docferry-result-label" });
+    linkBlock.createEl("code", { text: this.url });
+
+    const meta = card.createDiv({ cls: "docferry-result-meta" });
+    meta.createSpan({ text: "Updated" });
+    meta.createSpan({ text: this.updatedAt });
+
+    const buttons = contentEl.createDiv({ cls: "docferry-result-actions modal-button-container" });
+    const copyButton = buttons.createEl("button", { cls: "mod-cta", attr: { type: "button" } });
+    appendButtonLabel(copyButton, "copy", "Copy link");
+    copyButton.addEventListener("click", () => {
+      void this.copyLink();
+    });
+
+    const openButton = buttons.createEl("button", { attr: { type: "button" } });
+    appendButtonLabel(openButton, "external-link", "Open");
+    openButton.addEventListener("click", () => {
+      window.open(this.url);
+    });
+
+    const doneButton = buttons.createEl("button", { attr: { type: "button" } });
+    appendButtonLabel(doneButton, "check", "Done");
+    doneButton.addEventListener("click", () => {
       this.close();
     });
   }
+
+  private async copyLink(): Promise<void> {
+    await navigator.clipboard.writeText(this.url);
+    new Notice("Link copied");
+  }
+}
+
+function appendButtonLabel(button: HTMLElement, iconName: string, label: string): void {
+  const icon = button.createSpan({ cls: "docferry-button-icon", attr: { "aria-hidden": "true" } });
+  setIcon(icon, iconName);
+  button.createSpan({ text: label });
 }

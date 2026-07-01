@@ -27,6 +27,8 @@ The plugin stores settings in Obsidian plugin data on your device. This can incl
 
 DocFerry writes share metadata to the published note frontmatter using `df_*` keys. Imported shares are written only to the folder you choose.
 
+When you publish explicitly referenced local images or attachments, the bundled cloud upload SDK may use browser local or session storage for upload state. DocFerry plugin settings and account tokens are not stored there by the plugin.
+
 ## Hosted Service
 
 DocFerry operates a hosted sharing service at `https://docferry.fuyonder.tech`. The service stores published content and assets needed to serve active share links. Authentication is handled through Fuyonder account infrastructure.

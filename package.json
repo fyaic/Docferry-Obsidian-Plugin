@@ -1,8 +1,8 @@
 {
   "name": "docferry-obsidian-plugin",
-  "version": "0.0.16",
+  "version": "0.0.17",
   "private": true,
-  "description": "Publish one Obsidian note to a secure DocFerry share link.",
+  "description": "Publish one note to a secure DocFerry share link.",
   "scripts": {
     "build": "npm --prefix plugin run build",
     "dev": "npm --prefix plugin run dev",
@@ -14,6 +14,7 @@
     "@codemirror/view": "6.38.6",
     "@types/node": "^20.14.0",
     "@typescript-eslint/parser": "^8.61.1",
+    "cos-js-sdk-v5": "1.8.3",
     "esbuild": "^0.28.1",
     "eslint": "^9.39.4",
     "eslint-plugin-obsidianmd": "^0.3.0",
@@ -22,6 +23,6 @@
     "typescript-eslint": "^8.61.1"
   },
   "homepage": "https://fuyonder.tech",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "author": "Fuyonder"
 }

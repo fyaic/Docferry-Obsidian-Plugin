@@ -10,7 +10,7 @@ DocFerry does not publish an entire folder, vault, digital garden, or public dir
 
 ## Current Release
 
-- Obsidian plugin version: `0.0.17`
+- Obsidian plugin version: `0.0.18`
 - Hosted service: `https://docferry.fuyonder.tech`
 - Public account system: Fuyonder account
 - Public billing: disabled in this release

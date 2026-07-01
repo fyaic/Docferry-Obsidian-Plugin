@@ -1738,12 +1738,17 @@
 .docferry-workspace-brand-mark,
 .docferry-import-mark,
 .docferry-consent-logo {
+  align-items: center;
   background: none;
   border: 0;
   border-radius: 0;
   box-shadow: none;
-  display: contents;
+  display: inline-flex;
+  flex: 0 0 auto;
   height: auto;
+  justify-content: center;
+  line-height: 0;
+  margin: 0;
   overflow: visible;
   padding: 0;
   width: auto;

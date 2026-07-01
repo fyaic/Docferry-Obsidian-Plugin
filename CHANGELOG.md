@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.18
+
+- Replace `display: contents` in logo wrapper CSS with a transparent inline-flex wrapper to avoid the `css-display-contents` compatibility warning in Obsidian review.
+
 ## 0.0.17
 
 - Address Obsidian Community review feedback around license, description, release assets, async click callbacks, settings render calls, CSS overrides, and privacy copy.

@@ -1,6 +1,6 @@
 {
   "name": "docferry-obsidian-plugin",
-  "version": "0.0.17",
+  "version": "0.0.18",
   "private": true,
   "description": "Publish one note to a secure DocFerry share link.",
   "scripts": {

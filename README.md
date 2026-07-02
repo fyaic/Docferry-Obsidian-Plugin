@@ -21,6 +21,7 @@ DocFerry does not publish an entire folder, vault, digital garden, or public dir
 - Free quota: connected accounts receive a free 5-document quota from the hosted service
 - More quota: users can request extra free quota from the beta list flow in settings
 - Billing: public billing controls are not active in the plugin UI
+- Legal pages: hosted service provides `https://docferry.fuyonder.tech/privacy` and `https://docferry.fuyonder.tech/terms`
 - Versioning: the GitHub release tag, root `manifest.json`, and `plugin/manifest.json` must match
 
 If paid access or hosted-service billing is enabled later, update the README, privacy notice, release notes, product UI copy, and review evidence in the same release.

@@ -33,6 +33,8 @@ When you publish explicitly referenced local images or attachments, the bundled 
 
 DocFerry operates a hosted sharing service at `https://docferry.fuyonder.tech`. The service stores published content and assets needed to serve active share links. Authentication is handled through Fuyonder account infrastructure.
 
+The hosted service publishes current policy pages at `https://docferry.fuyonder.tech/privacy` and `https://docferry.fuyonder.tech/terms`.
+
 ## Payments
 
 The current public plugin build is free to install. Public billing is disabled in this release. Future paid access or hosted-service plans will require updated product copy, privacy terms, release notes, and user-facing controls before public launch.

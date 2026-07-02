@@ -1,6 +1,6 @@
 {
   "name": "docferry",
-  "version": "0.0.19",
+  "version": "0.0.20",
   "description": "Publish one note to a secure DocFerry share link.",
   "main": "main.js",
   "scripts": {

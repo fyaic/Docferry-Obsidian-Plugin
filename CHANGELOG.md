@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.0.21
+
+- Add real README screenshots for the publish, reader, manage shares, settings, and import workflows.
+- Add the live DocFerry preview link `https://docferry.fuyonder.tech/s/Gt5Wy3pwzY`.
+- Rename the unpublished-note right-click action and new-share modal title to `Share thru Docferry`.
+- Bump manifests, package metadata, and versions maps to `0.0.21`.
+
+## 0.0.20
+
+- Freeze the current public free plugin package after the July 2 release-line cleanup.
+- Record hosted legal pages in the README and privacy notice.
+- Bump manifests, package metadata, and versions maps to `0.0.20`.
+
 ## 0.0.18
 
 - Replace `display: contents` in logo wrapper CSS with a transparent inline-flex wrapper to avoid the `css-display-contents` compatibility warning in Obsidian review.

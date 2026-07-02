@@ -36,7 +36,7 @@ export class ShareModal extends Modal {
     contentEl.empty();
     renderDocferryHeader(
       contentEl,
-      this.defaults.isUpdate ? "Update share link" : "Publish share link",
+      this.defaults.isUpdate ? "Update share link" : "Share thru Docferry",
       "Publish exactly one Obsidian note as a secure DocFerry URL."
     );
 

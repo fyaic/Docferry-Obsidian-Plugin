@@ -254,7 +254,7 @@ export default class DocferryPlugin extends Plugin {
           });
         } else {
           menu.addItem((item) => {
-            item.setTitle("Publish share link")
+            item.setTitle("Share thru Docferry")
               .setIcon("share")
               .onClick(() => void this.publishFile(file));
           });

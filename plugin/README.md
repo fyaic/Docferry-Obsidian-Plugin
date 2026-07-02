@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docferry-cloud-logo.svg" alt="DocFerry cloud logo" width="112">
+  <img src="docferry-logo-256.png" alt="DocFerry logo" width="140">
 </p>
 
 <h1 align="center">DocFerry Plugin Package</h1>

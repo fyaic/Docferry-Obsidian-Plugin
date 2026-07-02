@@ -1,5 +1,5 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting, setIcon } from "obsidian";
-import { DOCFERRY_PRODUCT_DESCRIPTION, DOCFERRY_PRODUCT_NAME, renderDocferryHeader } from "./brand";
+import { DOCFERRY_PRODUCT_DESCRIPTION, DOCFERRY_PRODUCT_NAME, appendDocferryLogo, renderDocferryHeader } from "./brand";
 import type { BillingPlan, DisplayUser, ShareListItemResponse } from "./types";
 
 export type AuthMode = "manual-token" | "company-sso";
@@ -96,7 +96,7 @@ const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; icon: strin
   { id: "account", label: "Account", icon: "user" },
   { id: "shares", label: "Shares", icon: "files" },
   { id: "import", label: "Import", icon: "download" },
-  { id: "config", label: "Config", icon: "settings" }
+  { id: "config", label: "Settings", icon: "settings" }
 ];
 
 export class DocferrySettingTab extends PluginSettingTab {
@@ -172,7 +172,7 @@ export class DocferrySettingTab extends PluginSettingTab {
     const copy = header.createDiv();
     copy.createDiv({ text: "Account", cls: "docferry-heading docferry-heading-3" });
     copy.createEl("p", {
-      text: account ? "Fuyonder account is connected." : "Connect a Fuyonder account."
+      text: account ? "Fuyonder account is connected." : "Log in or sign up with your Fuyonder account."
     });
 
     const status = header.createDiv({
@@ -191,16 +191,13 @@ export class DocferrySettingTab extends PluginSettingTab {
       details.createEl("p", { text: `Connected ${formatDateTime(account.connectedAt)}` });
     }
     if (!account) {
-      details.createEl("p", { text: "Use Connect to start Auth0 login." });
+      details.createEl("p", { text: "Use Log in / Sign up to start account login." });
     }
-
-    this.renderMembershipCard(panel);
-    this.renderAccessRequestPanel(panel);
 
     const actions = panel.createDiv({ cls: "docferry-settings-actions" });
     if (this.host.settings.authMode === "company-sso") {
       const connectButton = actions.createEl("button", {
-        text: account ? "Refresh account" : "Connect",
+        text: account ? "Refresh account" : "Log in / Sign up",
         cls: "mod-cta",
         attr: { type: "button" }
       });
@@ -227,6 +224,13 @@ export class DocferrySettingTab extends PluginSettingTab {
         this.render();
       });
     }
+    this.renderLogoNote(
+      panel,
+      "Log in is used to record which account starts each file share, manage storage quota, and protect files with account-based access.",
+      "docferry-account-login-note"
+    );
+    this.renderMembershipCard(panel);
+    this.renderAccessRequestPanel(panel);
     status.setAttr("aria-label", account ? "Connected" : "Current account status");
   }
 
@@ -242,7 +246,7 @@ export class DocferrySettingTab extends PluginSettingTab {
         ? `${membershipAccessLabel(membership)} limits refreshed ${formatDateTime(membership.refreshedAt)}.`
         : connected
           ? "Access limits have not been refreshed."
-          : "Connect an account to view access limits."
+          : "Log in / Sign up to use your free 5-document quota."
     });
     header.createSpan({
       text: membership?.planDisplayName || (connected ? "Unknown" : "Not connected"),
@@ -260,10 +264,10 @@ export class DocferrySettingTab extends PluginSettingTab {
     if (membership?.billingEnabled) {
       const center = card.createDiv({ cls: "docferry-membership-center" });
       const centerCopy = center.createDiv({ cls: "docferry-membership-center-copy" });
-      centerCopy.createDiv({ text: "Billing", cls: "docferry-heading docferry-heading-5" });
-      centerCopy.createEl("p", { text: "Manage paid access on the DocFerry web dashboard." });
+      centerCopy.createDiv({ text: "Quota", cls: "docferry-heading docferry-heading-5" });
+      centerCopy.createEl("p", { text: "Manage quota on the DocFerry web dashboard." });
       const centerButton = center.createEl("button", {
-        text: "Open billing",
+        text: "Open quota",
         cls: "mod-cta",
         attr: { type: "button" }
       });
@@ -279,13 +283,13 @@ export class DocferrySettingTab extends PluginSettingTab {
     const connected = this.host.settings.authMode === "company-sso" && Boolean(this.host.settings.sessionToken);
     const panel = containerEl.createDiv({ cls: "docferry-account-request-panel docferry-settings-request-panel" });
     const copy = panel.createDiv({ cls: "docferry-account-request-copy" });
-    copy.createDiv({ text: "Request Plus access", cls: "docferry-heading docferry-heading-4" });
+    copy.createDiv({ text: "Request more quota", cls: "docferry-heading docferry-heading-4" });
     copy.createEl("p", {
       text: connected
-        ? "Tell us what you want to publish. Staff can approve Plus for 10 active shares and 5 MiB per file."
-        : "Connect your Fuyonder account before requesting Plus access."
+        ? "DocFerry is currently 100% free. We allocate extra free quota to users who join the beta list because we want to build this community with you."
+        : "Log in / Sign up before requesting more quota. DocFerry is currently 100% free, and beta-list users can receive extra free quota."
     });
-    const requestButton = panel.createEl("button", { text: "Request access", cls: "mod-cta", attr: { type: "button" } });
+    const requestButton = panel.createEl("button", { text: "Request more quota", cls: "mod-cta", attr: { type: "button" } });
     requestButton.disabled = !connected;
     addAsyncClickListener(requestButton, async () => {
       await this.host.requestAccessUpgrade("plugin_settings");
@@ -299,9 +303,23 @@ export class DocferrySettingTab extends PluginSettingTab {
     item.createEl("strong", { text: value });
   }
 
+  private renderLogoNote(containerEl: HTMLElement, text: string, extraClass = ""): void {
+    const note = containerEl.createDiv({ cls: extraClass ? `docferry-logo-note ${extraClass}` : "docferry-logo-note" });
+    appendDocferryLogo(note, "docferry-logo-note-mark").setAttr("aria-hidden", "true");
+    note.createEl("p", { text });
+  }
+
   private renderSharesSection(containerEl: HTMLElement): void {
     const currentKey = this.currentShareListKey();
     if (this.shareListKey && this.shareListKey !== currentKey) this.resetShareList();
+    const renderSecurityNote = (): void => {
+      this.renderLogoNote(
+        containerEl,
+        "Files are encrypted at rest in DocFerry Cloud. We do not use your content for training, ads, or secondary data use.",
+        "docferry-share-security-note"
+      );
+    };
+
     const panel = containerEl.createDiv({ cls: "docferry-settings-panel" });
     const header = panel.createDiv({ cls: "docferry-panel-header" });
     const copy = header.createDiv();
@@ -316,7 +334,8 @@ export class DocferrySettingTab extends PluginSettingTab {
     if (!this.hasAuthForShares()) {
       const empty = panel.createDiv({ cls: "docferry-settings-empty" });
       empty.createDiv({ text: "Not connected", cls: "docferry-heading docferry-heading-4" });
-      empty.createEl("p", { text: "Connect your Fuyonder account." });
+      empty.createEl("p", { text: "Log in / Sign up with your Fuyonder account." });
+      renderSecurityNote();
       return;
     }
 
@@ -326,6 +345,7 @@ export class DocferrySettingTab extends PluginSettingTab {
 
     if (this.shareListLoading) {
       this.renderShareSkeleton(panel);
+      renderSecurityNote();
       return;
     }
 
@@ -333,6 +353,7 @@ export class DocferrySettingTab extends PluginSettingTab {
       const error = panel.createDiv({ cls: "docferry-settings-empty is-error" });
       error.createDiv({ text: "Share list unavailable", cls: "docferry-heading docferry-heading-4" });
       error.createEl("p", { text: this.shareError });
+      renderSecurityNote();
       return;
     }
 
@@ -340,6 +361,7 @@ export class DocferrySettingTab extends PluginSettingTab {
       const empty = panel.createDiv({ cls: "docferry-settings-empty" });
       empty.createDiv({ text: "No shares yet", cls: "docferry-heading docferry-heading-4" });
       empty.createEl("p", { text: "Publish a note from the file menu." });
+      renderSecurityNote();
       return;
     }
 
@@ -390,6 +412,7 @@ export class DocferrySettingTab extends PluginSettingTab {
         });
       }
     }
+    renderSecurityNote();
   }
 
   private renderImportSection(containerEl: HTMLElement): void {
@@ -423,10 +446,10 @@ export class DocferrySettingTab extends PluginSettingTab {
       await this.host.importShareUrl();
     });
 
-    const details = panel.createDiv({ cls: "docferry-import-details" });
-    details.createSpan({ text: `Default folder: ${this.host.settings.defaultImportFolder || DEFAULT_SETTINGS.defaultImportFolder}` });
-    details.createSpan({ text: "Scope: single shared document" });
-    details.createSpan({ text: "Assets: explicit references only" });
+    const details = panel.createEl("ul", { cls: "docferry-import-details" });
+    details.createEl("li", { text: `Default folder: ${this.host.settings.defaultImportFolder || DEFAULT_SETTINGS.defaultImportFolder}` });
+    details.createEl("li", { text: "Scope: single shared document" });
+    details.createEl("li", { text: "Assets: explicit references only" });
   }
 
   private renderShareSkeleton(containerEl: HTMLElement): void {
@@ -486,7 +509,7 @@ export class DocferrySettingTab extends PluginSettingTab {
     const servicePanel = containerEl.createDiv({ cls: "docferry-settings-panel" });
     const serviceHeader = servicePanel.createDiv({ cls: "docferry-panel-header" });
     const serviceCopy = serviceHeader.createDiv();
-    serviceCopy.createDiv({ text: "Config", cls: "docferry-heading docferry-heading-3" });
+    serviceCopy.createDiv({ text: "Settings", cls: "docferry-heading docferry-heading-3" });
     serviceCopy.createEl("p", { text: "Connection, defaults and diagnostics." });
 
     new Setting(servicePanel)
@@ -522,7 +545,7 @@ export class DocferrySettingTab extends PluginSettingTab {
         .setName("Sign-in method")
         .setDesc("DocFerry uses Fuyonder account login for this release.")
         .addButton((button) => {
-          button.setButtonText("Connect");
+          button.setButtonText("Log in / Sign up");
           button.setCta();
           button.onClick(() => {
             void this.startCompanySignIn();
@@ -594,7 +617,7 @@ export class DocferrySettingTab extends PluginSettingTab {
 
     new Setting(defaultsPanel)
       .setName("Image quality")
-      .setDesc("Current alpha always uploads original image bytes. Optimized tiers are reserved for a later plan.");
+      .setDesc("The current public build uploads original image bytes. Optimized tiers are not enabled in the plugin UI.");
 
     new Setting(defaultsPanel)
       .setName("Loaded plugin version")
@@ -716,7 +739,7 @@ export function formatBytes(value: number): string {
 
 export function membershipUnavailableMessage(reason?: string | null): string {
   if (reason === "synapsehub_user_session_required") {
-    return "Reconnect your Fuyonder account before managing paid access. DocFerry is using Free limits until the session is refreshed.";
+    return "Refresh your Fuyonder login before managing quota. DocFerry is using Free limits until the session is refreshed.";
   }
   if (reason === "synapsehub_runtime_unreachable") {
     return "Access refresh is unavailable. DocFerry is using Free limits until it can refresh again.";

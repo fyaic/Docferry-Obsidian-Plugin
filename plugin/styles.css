@@ -358,6 +358,47 @@
   white-space: nowrap;
 }
 
+.docferry-logo-note {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  gap: 10px;
+  line-height: 1.45;
+  margin: 10px 0 0;
+  max-width: 42rem;
+  overflow-wrap: anywhere;
+}
+
+.docferry-logo-note-mark {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 38px;
+  height: 30px;
+  justify-content: center;
+  overflow: visible;
+  width: 38px;
+}
+
+.docferry-logo-note-mark img {
+  display: block;
+  height: 100%;
+  object-fit: contain;
+  width: 100%;
+}
+
+.docferry-logo-note p {
+  font-size: var(--font-ui-small);
+  margin: 0;
+}
+
+.docferry-account-login-note {
+  margin-top: 12px;
+}
+
+.docferry-share-security-note {
+  margin: -2px 4px 2px;
+}
+
 .docferry-account-request-panel {
   align-items: center;
   background: var(--background-secondary);
@@ -453,11 +494,14 @@
 
 .docferry-import-details {
   color: var(--text-faint);
-  display: flex;
-  flex-wrap: wrap;
+  display: block;
   font-size: 0.82rem;
-  gap: 7px 12px;
   margin-top: 12px;
+  padding-left: 1.2rem;
+}
+
+.docferry-import-details li + li {
+  margin-top: 5px;
 }
 
 .docferry-share-list {
@@ -2017,10 +2061,9 @@
 .docferry-settings-tab .docferry-import-details {
   border-top: 1px solid var(--df-line-soft);
   color: var(--text-muted);
-  gap: 8px 14px;
   line-height: 1.4;
   margin-top: 16px;
-  padding-top: 10px;
+  padding: 10px 0 0 1.2rem;
 }
 
 /* Share completion modal: calmer than Obsidian's default Setting rows, without changing share behavior. */

@@ -1,7 +1,7 @@
 {
   "id": "docferry",
   "name": "DocFerry",
-  "version": "0.0.35",
+  "version": "0.0.36",
   "minAppVersion": "1.12.7",
   "description": "Publish secure notes and Pro folders with DocFerry.",
   "author": "Bondie",

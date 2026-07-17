@@ -4,7 +4,7 @@ This directory contains the source, tests, manifest, styles, and generated
 bundle for the DocFerry Community plugin.
 
 - Plugin id: `docferry`
-- Version: `0.0.35`
+- Version: `0.0.36`
 - Production service: `https://docferry.bondie.io`
 - Account provider: Bondie Account
 - Callback protocols: `obsidian://docferry-auth` and `obsidian://docferry`

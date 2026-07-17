@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.36
+
+- Publish the paid production plugin through the Community release workflow.
+- Run release tests on Node 22 so the TypeScript test modules execute in CI.
+
+Version `0.0.35` was a pre-release candidate and did not produce a public
+GitHub Release.
+
 ## 0.0.35
 
 - Move the Community plugin to the Bondie production service and account

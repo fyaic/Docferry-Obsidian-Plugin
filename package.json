@@ -1,13 +1,14 @@
 {
   "name": "docferry-obsidian-plugin",
-  "version": "0.0.21",
+  "version": "0.0.35",
   "private": true,
-  "description": "Publish one note to a secure DocFerry share link.",
+  "description": "Publish secure notes and Pro folders with DocFerry.",
   "scripts": {
     "build": "npm --prefix plugin run build",
     "dev": "npm --prefix plugin run dev",
     "lint": "eslint plugin/src",
-    "check:plugin": "npm --prefix plugin run build && node --check plugin/main.js"
+    "check:plugin": "npm --prefix plugin run build && node --check plugin/main.js",
+    "test:plugin": "npm --prefix plugin test"
   },
   "devDependencies": {
     "@codemirror/state": "6.5.0",
@@ -22,7 +23,7 @@
     "typescript": "^5.4.5",
     "typescript-eslint": "^8.61.1"
   },
-  "homepage": "https://fuyonder.tech",
+  "homepage": "https://bondie.io",
   "license": "MIT",
-  "author": "Fuyonder"
+  "author": "Bondie"
 }

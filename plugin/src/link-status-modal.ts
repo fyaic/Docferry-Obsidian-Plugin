@@ -1,6 +1,5 @@
 import { App, Modal, Notice, Setting } from "obsidian";
 import { renderDocferryHeader } from "./brand";
-import { openExternalUrl } from "./external-links";
 import type { ShareLinksResponse, ShareLinkStatusResponse } from "./types";
 
 export class LinkStatusModal extends Modal {
@@ -43,7 +42,7 @@ export class LinkStatusModal extends Modal {
           })
           .addButton((button) => {
             button.setButtonText("Open").onClick(() => {
-              openExternalUrl(targetUrl);
+              window.open(targetUrl);
             });
           });
       }

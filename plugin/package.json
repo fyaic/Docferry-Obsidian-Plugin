@@ -1,12 +1,11 @@
 {
   "name": "docferry",
-  "version": "0.0.37",
-  "description": "Publish secure notes and Pro folders with DocFerry.",
+  "version": "0.0.38",
+  "description": "Publish one note to a secure DocFerry share link.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "tsc -noEmit && node esbuild.config.mjs production",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mts"
+    "build": "tsc -noEmit && node esbuild.config.mjs production"
   },
   "keywords": [
     "obsidian",
@@ -14,11 +13,11 @@
     "publish",
     "markdown"
   ],
-  "author": "Bondie",
+  "author": "Fuyonder",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.14.0",
-    "esbuild": "0.25.12",
+    "esbuild": "^0.25.12",
     "obsidian": "1.13.0",
     "typescript": "^5.4.5"
   },

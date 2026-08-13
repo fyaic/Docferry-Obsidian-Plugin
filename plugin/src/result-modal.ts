@@ -1,14 +1,12 @@
 import { App, Modal, Notice, setIcon } from "obsidian";
 import { renderDocferryHeader } from "./brand";
-import { openExternalUrl } from "./external-links";
 
 export class ResultModal extends Modal {
   constructor(
     app: App,
     private readonly title: string,
     private readonly url: string,
-    private readonly updatedAt: string,
-    private readonly kind: "document" | "folder" = "document"
+    private readonly updatedAt: string
   ) {
     super(app);
   }
@@ -18,15 +16,11 @@ export class ResultModal extends Modal {
     contentEl.empty();
     contentEl.addClass("docferry-result-modal");
 
-    renderDocferryHeader(
-      contentEl,
-      "Share link ready",
-      `Your published ${this.kind} is ready to open or copy.`
-    );
+    renderDocferryHeader(contentEl, "Share link ready", "Your published document is ready to open or copy.");
 
     const card = contentEl.createDiv({ cls: "docferry-result-card" });
     const titleBlock = card.createDiv({ cls: "docferry-result-title-block" });
-    titleBlock.createSpan({ text: this.kind === "folder" ? "Published folder" : "Published note", cls: "docferry-result-label" });
+    titleBlock.createSpan({ text: "Published note", cls: "docferry-result-label" });
     titleBlock.createDiv({ text: this.title, cls: "docferry-heading docferry-heading-3 docferry-result-title" });
 
     const linkBlock = card.createDiv({ cls: "docferry-result-link" });
@@ -47,7 +41,7 @@ export class ResultModal extends Modal {
     const openButton = buttons.createEl("button", { attr: { type: "button" } });
     appendButtonLabel(openButton, "external-link", "Open");
     openButton.addEventListener("click", () => {
-      openExternalUrl(this.url);
+      window.open(this.url);
     });
 
     const doneButton = buttons.createEl("button", { attr: { type: "button" } });

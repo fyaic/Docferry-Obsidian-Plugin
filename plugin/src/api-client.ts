@@ -9,14 +9,7 @@ import type {
   AuthWhoamiResponse,
   DashboardLinkResponse,
   DeleteShareResponse,
-  FolderShareDocumentPayload,
-  FolderShareDocumentResponse,
-  FolderShareDraftPayload,
-  FolderShareDraftResponse,
-  FolderShareListResponse,
-  FolderShareResponse,
   MembershipResponse,
-  MediaNoteJobResponse,
   SharePayload,
   ShareImportPayloadResponse,
   ShareListResponse,
@@ -25,7 +18,6 @@ import type {
   ShareStatusResponse
 } from "./types";
 import type { DocferrySettings } from "./settings";
-import { isInvalidProductSessionError } from "./session-errors";
 
 interface ErrorEnvelope {
   error?: {
@@ -56,8 +48,7 @@ export class ShareApiError extends Error {
 export class ShareApiClient {
   constructor(
     private readonly getSettings: () => DocferrySettings,
-    private readonly pluginVersion: string,
-    private readonly onInvalidSession?: (error: ShareApiError) => void
+    private readonly pluginVersion: string
   ) {}
 
   async health(): Promise<{ ok: boolean; service: string; version: string }> {
@@ -88,34 +79,15 @@ export class ShareApiClient {
     return this.deleteJson(`/v0/shares/${encodeURIComponent(shareId)}`);
   }
 
-  async createFolderShareDraft(payload: FolderShareDraftPayload): Promise<FolderShareDraftResponse> {
-    return this.postJson("/v0/folder-shares/drafts", payload);
-  }
-
-  async putFolderShareDocument(
-    revisionId: string,
-    routeKey: string,
-    payload: FolderShareDocumentPayload
-  ): Promise<FolderShareDocumentResponse> {
-    return this.putJson(
-      `/v0/folder-shares/drafts/${encodeURIComponent(revisionId)}/documents/${encodeURIComponent(routeKey)}`,
-      payload
-    );
-  }
-
-  async commitFolderShareDraft(
-    revisionId: string,
-    payload: { password?: string; password_mode: "keep" | "set" | "clear"; expires_at?: string | null }
-  ): Promise<FolderShareResponse> {
-    return this.postJson(`/v0/folder-shares/drafts/${encodeURIComponent(revisionId)}/commit`, payload);
-  }
-
-  async listFolderShares(): Promise<FolderShareListResponse> {
-    return this.getJson("/v0/folder-shares");
-  }
-
-  async deleteFolderShare(folderShareId: string): Promise<DeleteShareResponse> {
-    return this.deleteJson(`/v0/folder-shares/${encodeURIComponent(folderShareId)}`);
+  async validateAuthToken(): Promise<void> {
+    try {
+      await this.getJson("/v0/shares/sh_token_probe");
+    } catch (error) {
+      if (error instanceof ShareApiError && error.status === 404 && error.code === "share_not_found") {
+        return;
+      }
+      throw error;
+    }
   }
 
   async uploadAsset(
@@ -257,22 +229,6 @@ export class ShareApiClient {
     return this.postJson("/v0/access-requests", payload);
   }
 
-  async createMediaNoteJob(sourceUrl: string, idempotencyKey: string): Promise<MediaNoteJobResponse> {
-    return this.postJson(
-      "/v0/media-note/jobs",
-      { source_url: sourceUrl, output_language: "source" },
-      { "Idempotency-Key": idempotencyKey }
-    );
-  }
-
-  async getMediaNoteJob(jobId: string): Promise<MediaNoteJobResponse> {
-    return this.getJson(`/v0/media-note/jobs/${encodeURIComponent(jobId)}`);
-  }
-
-  async cancelMediaNoteJob(jobId: string): Promise<MediaNoteJobResponse> {
-    return this.postJson(`/v0/media-note/jobs/${encodeURIComponent(jobId)}/cancel`, {});
-  }
-
   async logout(): Promise<{ ok: boolean }> {
     return this.postJson("/v0/auth/logout", {});
   }
@@ -335,11 +291,11 @@ export class ShareApiClient {
     return this.parse<T>(res.status, res.text);
   }
 
-  private async postJson<T>(path: string, body: unknown, extraHeaders: Record<string, string> = {}): Promise<T> {
+  private async postJson<T>(path: string, body: unknown): Promise<T> {
     const res = await requestUrl({
       url: this.url(path),
       method: "POST",
-      headers: { ...this.headers(true), ...extraHeaders },
+      headers: this.headers(true),
       body: JSON.stringify(body),
       throw: false
     });
@@ -378,7 +334,7 @@ export class ShareApiClient {
       "X-Share-Plugin-Version": this.pluginVersion
     };
     if (json) headers["Content-Type"] = "application/json";
-    const token = settings.sessionToken;
+    const token = settings.authMode === "company-sso" ? settings.sessionToken : settings.manualApiToken || settings.apiToken;
     if (token) headers.Authorization = `Bearer ${token}`;
     return headers;
   }
@@ -397,15 +353,13 @@ export class ShareApiClient {
 
     const envelope = parsed as ErrorEnvelope | undefined;
     const message = envelope?.error?.message || text || `Request failed with ${status}`;
-    const error = new ShareApiError(
+    throw new ShareApiError(
       message,
       status,
       envelope?.error?.code,
       envelope?.error?.request_id,
       envelope?.error?.details
     );
-    if (isInvalidProductSessionError(error)) this.onInvalidSession?.(error);
-    throw error;
   }
 }
 

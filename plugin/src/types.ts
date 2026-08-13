@@ -22,7 +22,6 @@ export interface SharePayload {
   title: string;
   markdown: string;
   html_snapshot: string | null;
-  theme_mode: "reader" | "full";
   css_asset_id: string | null;
   assets: Array<{
     asset_id: string;
@@ -85,7 +84,6 @@ export interface ShareResponse {
   slug: string;
   url: string;
   status: ShareStatus;
-  theme_mode: "reader" | "full";
   password_enabled: boolean;
   expires_at?: string | null;
   created_at?: string;
@@ -102,7 +100,6 @@ export interface ShareStatusResponse {
   source_hash: string;
   title: string;
   status: ShareStatus;
-  theme_mode: "reader" | "full";
   password_enabled: boolean;
   expires_at?: string | null;
   stopped_at?: string | null;
@@ -120,7 +117,6 @@ export interface ShareListItemResponse {
   source_path: string;
   title: string;
   status: ShareStatus;
-  theme_mode: "reader" | "full";
   password_enabled: boolean;
   expires_at?: string | null;
   stopped_at?: string | null;
@@ -134,66 +130,6 @@ export interface ShareListResponse {
   total: number;
   limit: number;
   offset: number;
-}
-
-export interface FolderShareDraftPayload {
-  folder_share_id?: string | null;
-  vault_id: string | null;
-  source_folder: string;
-  title: string;
-  expected_document_count: number;
-  theme_mode: "reader" | "full";
-  css_asset_id: string | null;
-  client: SharePayload["client"];
-}
-
-export interface FolderShareDraftResponse {
-  folder_share_id: string;
-  revision_id: string;
-  state: "draft";
-  expected_document_count: number;
-}
-
-export interface FolderShareDocumentPayload {
-  route_key: string;
-  relative_path: string;
-  source_hash: string;
-  title: string;
-  markdown: string;
-  html_snapshot: string | null;
-  css_asset_id: string | null;
-  assets: SharePayload["assets"];
-  navigation_order: number;
-}
-
-export interface FolderShareDocumentResponse {
-  revision_id: string;
-  document_id: string;
-  route_key: string;
-  relative_path: string;
-  document_count: number;
-  total_bytes: number;
-}
-
-export interface FolderShareResponse {
-  folder_share_id: string;
-  revision_id: string;
-  slug: string;
-  url: string;
-  title: string;
-  source_folder: string;
-  status: ShareStatus;
-  theme_mode: "reader" | "full";
-  password_enabled: boolean;
-  document_count: number;
-  total_bytes: number;
-  expires_at?: string | null;
-  updated_at: string;
-}
-
-export interface FolderShareListResponse {
-  folder_shares: FolderShareResponse[];
-  total: number;
 }
 
 export interface ShareLinkStatusResponse {
@@ -219,14 +155,6 @@ export interface DeleteShareResponse {
   stopped_at: string;
 }
 
-export type AccountCenterTarget = "account" | "profile" | "security" | "devices" | "privacy";
-
-export interface MediaNoteRuntime {
-  enabled: boolean;
-  supported_providers: string[];
-  supported_source_kinds: string[];
-}
-
 export interface AuthConfig {
   provider: string;
   auth_profile?: string | null;
@@ -239,12 +167,7 @@ export interface AuthConfig {
   auth_config_url?: string | null;
   distribution_bundle_url?: string | null;
   account_center_url?: string | null;
-  profile_settings_url?: string | null;
-  account_security_url?: string | null;
-  devices_url?: string | null;
-  privacy_url?: string | null;
   billing?: BillingConfig | null;
-  media_note: MediaNoteRuntime;
 }
 
 export interface AuthExchangeResponse {
@@ -262,9 +185,9 @@ export interface AuthExchangeResponse {
 export interface AuthWhoamiResponse {
   authenticated: boolean;
   auth_type: string;
-  billing_session_ready?: boolean;
-  product_subject_id: string;
-  product_key: string;
+  owner_id: string;
+  product_subject_id?: string | null;
+  product_key?: string | null;
   product_instance_id?: string | null;
   scopes: string[];
   expires_at?: string | null;
@@ -313,55 +236,15 @@ export interface MembershipResponse {
   entitlement_key?: string | null;
   active_share_count: number;
   active_share_limit: number;
-  active_folder_share_count: number;
-  active_folder_share_limit: number;
-  max_folder_document_count: number;
-  max_folder_total_bytes: number;
   max_single_file_size_bytes: number;
   can_create_share: boolean;
-  can_create_folder_share: boolean;
-  can_use_full_theme: boolean;
   limit_source: string;
   entitlements: Array<{ key: string; status: string; expires_at?: string | null }>;
   capabilities: Array<{ key: string; status: string; source_entitlement_key: string }>;
   feature_gates: Record<string, boolean>;
-  media_note: MediaNoteRuntime;
   cache: { status: string; ttl_seconds: number };
   billing: BillingConfig;
   unavailable_reason?: string | null;
-}
-
-export type MediaNoteJobStatus =
-  | "queued"
-  | "fetching"
-  | "extracted"
-  | "degraded"
-  | "unsupported"
-  | "failed"
-  | "cancelled"
-  | "expired";
-
-export interface MediaNoteJobResponse {
-  job_id: string;
-  source_url: string | null;
-  source_kind: string;
-  provider: string;
-  output_language: string;
-  status: MediaNoteJobStatus;
-  fetched_bytes: number;
-  content_type?: string | null;
-  redirect_count: number;
-  warnings: string[];
-  error_code?: string | null;
-  error_message?: string | null;
-  result_contract?: Record<string, unknown> | null;
-  markdown?: string | null;
-  expires_at: string;
-  started_at?: string | null;
-  completed_at?: string | null;
-  cancelled_at?: string | null;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface AccessRequestResponse {

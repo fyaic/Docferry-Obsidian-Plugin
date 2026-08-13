@@ -1,42 +1,17 @@
 # Changelog
 
-## 0.0.37
+## 0.0.38
 
-- Fix Community plugin login and account creation for the current free
-  production service at `https://docferry.fuyonder.tech`.
-- Migrate old unauthenticated installs that still point to
-  `https://docferry.bondie.io` while preserving existing connected accounts.
-- Refresh public docs, privacy links, and import placeholders to the current
-  service URL.
-
-## 0.0.36
-
-- Publish the paid production plugin through the Community release workflow.
-- Run release tests on Node 22 so the TypeScript test modules execute in CI.
-- Pin the root and packaged plugin to the same esbuild version so local, audit,
-  and release bundles remain byte-for-byte reproducible.
-
-Version `0.0.35` was a pre-release candidate and did not produce a public
-GitHub Release.
-
-## 0.0.35
-
-- Move the Community plugin to the Bondie production service and account
-  boundary.
-- Add the novice-first Home, My shares, Account, and Preferences workflows.
-- Add paid Folder Share and bounded Full Theme support while keeping Free
-  access fail-closed.
-- Fix Stripe return callbacks and membership refresh behavior.
-- Add public-web link import and gated detailed-note infrastructure without
-  exposing model-provider credentials to the plugin.
-- Protect folder assets and snapshots from maintenance cleanup and keep an
-  existing folder updatable at the active-folder limit.
-- Remove legacy hostnames and obsolete free-release access-request behavior.
+- Restore the public free-launch plugin line after the 0.0.36/0.0.37 paid-line
+  package drift.
+- Keep the free-launch UI and disabled public billing behavior from 0.0.21.
+- Migrate unauthenticated installs that still point to `https://docferry.bondie.io`
+  back to the current free service at `https://docferry.fuyonder.tech`.
 
 ## 0.0.21
 
 - Add real README screenshots for the publish, reader, manage shares, settings, and import workflows.
-- Add a hosted preview link for the public free release at that time.
+- Add the live DocFerry preview link `https://docferry.fuyonder.tech/s/Gt5Wy3pwzY`.
 - Rename the unpublished-note right-click action and new-share modal title to `Share thru Docferry`.
 - Bump manifests, package metadata, and versions maps to `0.0.21`.
 
@@ -65,9 +40,9 @@ GitHub Release.
 ## 0.0.15
 
 - Replace the previously published legacy community build with the June 30 public free launch plugin.
-- Restore the dashboard/settings UI, legacy account connection, upload disclosure, request-access flow, share/import tools, and free-launch access policy integration used at that time.
+- Restore the current DocFerry dashboard/settings UI, Fuyonder account connection, upload disclosure, request-access flow, share/import tools, and free-launch access policy integration.
 - Keep public billing disabled for this release; access upgrades are handled through request review rather than Checkout.
-- Update public repository metadata, privacy copy, manifests, package metadata, and versions maps for the historical free release line.
+- Update public repository metadata, privacy copy, manifests, package metadata, and versions maps to the Fuyonder release line.
 
 ## 0.0.14
 

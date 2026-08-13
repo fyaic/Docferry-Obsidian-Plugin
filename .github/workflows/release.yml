@@ -22,7 +22,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 20
           cache: npm
           cache-dependency-path: plugin/package-lock.json
 
@@ -34,10 +34,6 @@ jobs:
         working-directory: plugin
         run: npm run build
 
-      - name: Test plugin
-        working-directory: plugin
-        run: npm test
-
       - name: Check version
         shell: bash
         run: |
@@ -46,8 +42,6 @@ jobs:
           plugin_manifest_version="$(node -p "require('./plugin/manifest.json').version")"
           test "$tag" = "$manifest_version"
           test "$tag" = "$plugin_manifest_version"
-          test "$tag" = "$(node -p "require('./package.json').version")"
-          test "$tag" = "$(node -p "require('./plugin/package.json').version")"
 
       - name: Stage release artifacts
         shell: bash

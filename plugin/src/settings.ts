@@ -1,6 +1,7 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting, setIcon } from "obsidian";
 import { DOCFERRY_PRODUCT_DESCRIPTION, DOCFERRY_PRODUCT_NAME, renderDocferryHeader } from "./brand";
 import { canUseMediaNote } from "./media-note-availability";
+import { DOCFERRY_PRODUCTION_SERVICE_URL } from "./service-url";
 import type {
   AccountCenterTarget,
   DisplayUser,
@@ -68,7 +69,7 @@ export interface DocferrySettings {
 }
 
 export const DEFAULT_SETTINGS: DocferrySettings = {
-  serverUrl: "https://docferry.bondie.io",
+  serverUrl: DOCFERRY_PRODUCTION_SERVICE_URL,
   sessionToken: "",
   connectedAccount: null,
   membership: null,

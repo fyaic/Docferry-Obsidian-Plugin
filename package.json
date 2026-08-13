@@ -1,6 +1,6 @@
 {
   "name": "docferry-obsidian-plugin",
-  "version": "0.0.36",
+  "version": "0.0.37",
   "private": true,
   "description": "Publish secure notes and Pro folders with DocFerry.",
   "scripts": {

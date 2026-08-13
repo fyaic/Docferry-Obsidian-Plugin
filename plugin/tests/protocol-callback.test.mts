@@ -13,8 +13,8 @@ test("routes Stripe return callbacks to membership refresh instead of login", ()
 
 test("routes import callbacks only when a URL is present", () => {
   assert.deepEqual(
-    classifyProtocolCallback({ flow: "import", url: "https://docferry.bondie.io/s/example" }),
-    { kind: "import", url: "https://docferry.bondie.io/s/example" }
+    classifyProtocolCallback({ flow: "import", url: "https://docferry.fuyonder.tech/s/example" }),
+    { kind: "import", url: "https://docferry.fuyonder.tech/s/example" }
   );
   assert.deepEqual(
     classifyProtocolCallback({ flow: "import" }),

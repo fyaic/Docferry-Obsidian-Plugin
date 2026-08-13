@@ -64,7 +64,7 @@ class DocferryUploadConsentModal extends Modal {
     });
     const privacy = details.createEl("a", {
       text: "Read the DocFerry Privacy Policy",
-      href: "https://docferry.bondie.io/privacy"
+      href: "https://docferry.fuyonder.tech/privacy"
     });
     privacy.setAttr("target", "_blank");
     privacy.setAttr("rel", "noopener noreferrer");

@@ -27,6 +27,10 @@ import {
 import { confirmMediaNoteImport } from "./media-note-preview-modal";
 import { supportsDetailedNoteProvider } from "./media-note-availability";
 import {
+  DOCFERRY_PRODUCTION_SERVICE_URL,
+  shouldMigrateLegacyBondieServiceUrl
+} from "./service-url";
+import {
   DEFAULT_SETTINGS,
   DocferrySettingTab,
   membershipFromResponse,
@@ -403,6 +407,10 @@ export default class DocferryPlugin extends Plugin {
     let changed = Boolean(loadedSettings && Object.keys(loadedSettings).some((key) => !allowedKeys.has(key)));
     if (!this.docferrySettings.clientInstanceId) {
       this.docferrySettings.clientInstanceId = `obs_${crypto.randomUUID()}`;
+      changed = true;
+    }
+    if (shouldMigrateLegacyBondieServiceUrl(this.docferrySettings)) {
+      this.docferrySettings.serverUrl = DOCFERRY_PRODUCTION_SERVICE_URL;
       changed = true;
     }
     const normalizedImportFolder =
@@ -1939,6 +1947,7 @@ function fallbackAccountCenterUrl(serverUrl: string, target: AccountCenterTarget
   if (target === "privacy") return `${baseUrl}/privacy`;
   return `${baseUrl}/dashboard`;
 }
+
 
 function urlText(value: unknown): string | null {
   const trimmed = textValue(value).trim();

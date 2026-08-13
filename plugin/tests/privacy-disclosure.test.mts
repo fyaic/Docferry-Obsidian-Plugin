@@ -19,5 +19,5 @@ test("shows the v4 privacy disclosure to new and upgraded installs", async () =>
   assert.match(disclosure, /temporary detailed-note content is cleared/);
   assert.match(disclosure, /Create note/);
   assert.match(disclosure, /Your account token stays in Obsidian plugin storage/);
-  assert.match(disclosure, /https:\/\/docferry\.bondie\.io\/privacy/);
+  assert.match(disclosure, /https:\/\/docferry\.fuyonder\.tech\/privacy/);
 });

@@ -12,7 +12,7 @@ DocFerry is designed for deliberate sharing. It publishes only the note or
 folder you choose. It does not turn your vault into a website and does not scan
 unrelated vault content.
 
-Production service: [docferry.bondie.io](https://docferry.bondie.io)
+Production service: [docferry.fuyonder.tech](https://docferry.fuyonder.tech)
 
 ## Start Here
 
@@ -76,9 +76,9 @@ Read [PRIVACY.md](PRIVACY.md) before publishing sensitive material.
 ## Support And Policies
 
 - Support: [support@bondie.io](mailto:support@bondie.io)
-- Privacy: [docferry.bondie.io/privacy](https://docferry.bondie.io/privacy)
-- Terms: [docferry.bondie.io/terms](https://docferry.bondie.io/terms)
-- Account Center: [account.bondie.io/account](https://account.bondie.io/account)
+- Privacy: [docferry.fuyonder.tech/privacy](https://docferry.fuyonder.tech/privacy)
+- Terms: [docferry.fuyonder.tech/terms](https://docferry.fuyonder.tech/terms)
+- Account Center: [docferry.fuyonder.tech/dashboard](https://docferry.fuyonder.tech/dashboard)
 
 ## Manual Install
 

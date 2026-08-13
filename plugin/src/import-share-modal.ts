@@ -40,7 +40,7 @@ export class ImportShareModal extends Modal {
       .setDesc("Import one DocFerry share into this vault.")
       .addText((text) => {
         text
-          .setPlaceholder("https://docferry.bondie.io/s/...")
+          .setPlaceholder("https://docferry.fuyonder.tech/s/...")
           .setValue(this.url)
           .onChange((value) => {
             this.url = value.trim();

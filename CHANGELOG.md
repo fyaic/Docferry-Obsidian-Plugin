@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.37
+
+- Fix Community plugin login and account creation for the current free
+  production service at `https://docferry.fuyonder.tech`.
+- Migrate old unauthenticated installs that still point to
+  `https://docferry.bondie.io` while preserving existing connected accounts.
+- Refresh public docs, privacy links, and import placeholders to the current
+  service URL.
+
 ## 0.0.36
 
 - Publish the paid production plugin through the Community release workflow.

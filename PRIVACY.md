@@ -36,10 +36,10 @@ folder selected by the plugin workflow.
 
 ## Hosted Service
 
-The production service is `https://docferry.bondie.io`. Active share content
-and required assets are stored to serve the link. Bondie Account at
-`https://account.bondie.io` owns login, account security, devices, privacy, and
-billing. Managed model-provider credentials remain server-side.
+The production service is `https://docferry.fuyonder.tech`. Active share content
+and required assets are stored to serve the link. Bondie Account owns login,
+account security, devices, privacy, and billing. Managed model-provider
+credentials remain server-side.
 
 Stopping a share makes its public link unavailable. Someone who already had
 access may have viewed, downloaded, or copied the material before it was
@@ -61,5 +61,5 @@ send private notes, passwords, session tokens, or active private share links in
 support requests.
 
 - Support: `support@bondie.io`
-- Privacy: `https://docferry.bondie.io/privacy`
-- Terms: `https://docferry.bondie.io/terms`
+- Privacy: `https://docferry.fuyonder.tech/privacy`
+- Terms: `https://docferry.fuyonder.tech/terms`

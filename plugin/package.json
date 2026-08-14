@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit && node esbuild.config.mjs production",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mts"
+    "test": "node --import tsx --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mts"
   },
   "keywords": [
     "obsidian",
@@ -20,6 +20,7 @@
     "@types/node": "^20.14.0",
     "esbuild": "0.25.12",
     "obsidian": "1.13.0",
+    "tsx": "4.23.12",
     "typescript": "^5.4.5"
   },
   "dependencies": {

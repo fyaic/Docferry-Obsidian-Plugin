@@ -6,7 +6,6 @@ export type AuthMode = "manual-token" | "company-sso";
 export type ImageUploadQuality = "original" | "high" | "standard";
 export const MANUAL_TOKEN_ENTRY_ENABLED = false;
 export const DOCFERRY_PRODUCTION_SERVICE_URL = "https://docferry.fuyonder.tech";
-export const DOCFERRY_LEGACY_BONDIE_SERVICE_URL = "https://docferry.bondie.io";
 
 export interface ConnectedAccount {
   productSubjectId: string;
@@ -77,12 +76,18 @@ export const DEFAULT_SETTINGS: DocferrySettings = {
   debug: false
 };
 
-export function shouldMigrateLegacyBondieServiceUrl(settings: DocferrySettings): boolean {
-  return (
-    settings.serverUrl.replace(/\/+$/, "") === DOCFERRY_LEGACY_BONDIE_SERVICE_URL &&
-    !settings.sessionToken &&
-    !settings.connectedAccount
-  );
+export function shouldResetToProductionServiceUrl(settings: DocferrySettings): boolean {
+  return settings.serverUrl.replace(/\/+$/, "") !== DOCFERRY_PRODUCTION_SERVICE_URL;
+}
+
+export function resetToProductionServiceUrl(settings: DocferrySettings): void {
+  settings.serverUrl = DOCFERRY_PRODUCTION_SERVICE_URL;
+  settings.authMode = "company-sso";
+  settings.sessionToken = "";
+  settings.manualApiToken = "";
+  settings.apiToken = "";
+  settings.connectedAccount = null;
+  settings.membership = null;
 }
 
 export interface SettingsHost {
@@ -524,14 +529,19 @@ export class DocferrySettingTab extends PluginSettingTab {
 
     new Setting(servicePanel)
       .setName("Server URL")
-      .setDesc("DocFerry service URL.")
+      .setDesc("The public free release uses the Fuyonder DocFerry service.")
       .addText((text) =>
         text
           .setPlaceholder("https://docferry.fuyonder.tech")
           .setValue(this.host.settings.serverUrl)
           .onChange(async (value) => {
-            this.host.settings.serverUrl = value.trim();
+            const nextValue = value.trim().replace(/\/+$/, "");
+            if (nextValue && nextValue !== DOCFERRY_PRODUCTION_SERVICE_URL) {
+              new Notice("This public free release uses the Fuyonder DocFerry service.");
+            }
+            resetToProductionServiceUrl(this.host.settings);
             await this.host.saveSettings();
+            this.render();
           })
       );
 

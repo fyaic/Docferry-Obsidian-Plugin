@@ -12,13 +12,13 @@ import { ImportShareModal, type ImportShareOptions } from "./import-share-modal"
 import { LinkStatusModal } from "./link-status-modal";
 import {
   DEFAULT_SETTINGS,
-  DOCFERRY_PRODUCTION_SERVICE_URL,
   DocferrySettingTab,
   MANUAL_TOKEN_ENTRY_ENABLED,
   membershipFromResponse,
   formatBytes,
   normalizeVaultFolder,
-  shouldMigrateLegacyBondieServiceUrl,
+  resetToProductionServiceUrl,
+  shouldResetToProductionServiceUrl,
   type DocferrySettings,
   type ImageUploadQuality
 } from "./settings";
@@ -291,8 +291,8 @@ export default class DocferryPlugin extends Plugin {
       this.settings.authMode = "company-sso";
       changed = true;
     }
-    if (shouldMigrateLegacyBondieServiceUrl(this.settings)) {
-      this.settings.serverUrl = DOCFERRY_PRODUCTION_SERVICE_URL;
+    if (shouldResetToProductionServiceUrl(this.settings)) {
+      resetToProductionServiceUrl(this.settings);
       changed = true;
     }
     const normalizedImportFolder =

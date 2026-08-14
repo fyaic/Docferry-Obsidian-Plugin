@@ -1,12 +1,21 @@
 # Changelog
 
+## 0.0.39
+
+- Remove the remaining legacy service runtime path from the public free plugin
+  package.
+- Force public free installs back to `https://docferry.fuyonder.tech` when an
+  older or non-current service URL is found.
+- Clear stale session, account, and membership state during that service reset
+  so users reconnect through the current Fuyonder free service.
+
 ## 0.0.38
 
 - Restore the public free-launch plugin line after the 0.0.36/0.0.37 paid-line
   package drift.
 - Keep the free-launch UI and disabled public billing behavior from 0.0.21.
-- Migrate unauthenticated installs that still point to `https://docferry.bondie.io`
-  back to the current free service at `https://docferry.fuyonder.tech`.
+- Migrate unauthenticated installs that still point to an older service URL back
+  to the current free service at `https://docferry.fuyonder.tech`.
 
 ## 0.0.21
 

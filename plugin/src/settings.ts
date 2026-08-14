@@ -793,10 +793,12 @@ export function membershipFromResponse(
     limit_source: string;
     cache: { status: string };
     unavailable_reason?: string | null;
-    billing: { enabled: boolean; plans: BillingPlan[] };
+    billing?: { enabled?: boolean | null; plans?: BillingPlan[] | null } | null;
   },
   refreshedAt = new Date().toISOString()
 ): MembershipSnapshot {
+  const billing = response.billing ?? null;
+  const billingPlans = Array.isArray(billing?.plans) ? billing.plans : [];
   return {
     productKey: response.product_key,
     planKey: response.plan_key,
@@ -810,8 +812,8 @@ export function membershipFromResponse(
     cacheStatus: response.cache.status,
     refreshedAt,
     unavailableReason: response.unavailable_reason ?? null,
-    billingEnabled: Boolean(response.billing.enabled),
-    billingPlans: response.billing.plans.map((plan) => ({
+    billingEnabled: Boolean(billing?.enabled),
+    billingPlans: billingPlans.map((plan) => ({
       planKey: plan.plan_key,
       displayName: plan.display_name,
       amountMinorUnits: plan.amount_minor_units,

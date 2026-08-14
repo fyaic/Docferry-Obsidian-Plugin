@@ -167,7 +167,7 @@ export default class DocferryPlugin extends Plugin {
 
     this.addCommand({
       id: "publish-current-note",
-      name: "Publish current note",
+      name: "Share current note",
       checkCallback: (checking) => {
         const file = this.getActiveMarkdownFile();
         if (!file) return false;

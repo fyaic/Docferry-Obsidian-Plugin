@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.40
+
+- Fix the public free plugin membership refresh parser so free service responses
+  without billing metadata cannot block note sharing.
+- Keep the file explorer share action labeled `Share thru Docferry`.
+- Rename the command palette action to `Share current note` to avoid stale
+  publish wording while still satisfying Obsidian command naming rules.
+- Keep the release on `https://docferry.fuyonder.tech` with public billing
+  disabled.
+
 ## 0.0.39
 
 - Remove the remaining legacy service runtime path from the public free plugin

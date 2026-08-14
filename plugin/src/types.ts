@@ -243,7 +243,7 @@ export interface MembershipResponse {
   capabilities: Array<{ key: string; status: string; source_entitlement_key: string }>;
   feature_gates: Record<string, boolean>;
   cache: { status: string; ttl_seconds: number };
-  billing: BillingConfig;
+  billing?: BillingConfig | null;
   unavailable_reason?: string | null;
 }
 

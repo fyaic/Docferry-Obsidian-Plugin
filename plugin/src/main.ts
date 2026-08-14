@@ -1,31 +1,67 @@
-import { App, Component, MarkdownRenderer, MarkdownView, Notice, Plugin, TFile, normalizePath } from "obsidian";
+import { App, Component, MarkdownRenderer, MarkdownView, Notice, Plugin, TFile, TFolder, normalizePath } from "obsidian";
 import { ShareApiClient, ShareApiError } from "./api-client";
-import { AuthService } from "./auth-service";
-import { confirmStopShare } from "./confirm-stop-modal";
+import { isInvalidProductSessionError } from "./session-errors";
+import { AuthCompletionError, AuthService } from "./auth-service";
+import { confirmDeleteShareHistory, confirmStopShare } from "./confirm-stop-modal";
 import {
   DOCFERRY_DASHBOARD_VIEW_TYPE,
   DocferryDashboardView,
   type DashboardImportResult
 } from "./dashboard-view";
 import { clearShareMeta, readShareMeta, writeShareMeta } from "./frontmatter";
+import { buildExternalLinkNote, externalLinkProviderLabel } from "./external-import";
+import { openExternalUrl } from "./external-links";
+import { folderShareAccess } from "./folder-share-access";
+import { FolderShareModal } from "./folder-share-modal";
+import { classifyProtocolCallback } from "./protocol-callback";
 import { ImportShareModal, type ImportShareOptions } from "./import-share-modal";
+import { commitAtomicImport, type ImportFileSystem } from "./import-transaction";
 import { LinkStatusModal } from "./link-status-modal";
+import {
+  MEDIA_NOTE_READY_STATUSES,
+  MEDIA_NOTE_MAX_POLL_ATTEMPTS,
+  MEDIA_NOTE_POLL_INTERVAL_MS,
+  MEDIA_NOTE_TERMINAL_STATUSES,
+  type MediaNoteProgress,
+  mediaNoteFailureMessage,
+  mediaNoteMarkdownForObsidian,
+  mediaNoteTitle
+} from "./media-note";
+import { confirmMediaNoteImport } from "./media-note-preview-modal";
+import {
+  hasMediaNoteJobCapacity,
+  requiresDetailedNoteProvider,
+  shouldPrepareDetailedNote
+} from "./media-note-availability";
 import {
   DEFAULT_SETTINGS,
   DocferrySettingTab,
-  MANUAL_TOKEN_ENTRY_ENABLED,
-  membershipFromResponse,
   formatBytes,
+  membershipLimitLabel,
+  membershipFromResponse,
   normalizeVaultFolder,
-  resetToProductionServiceUrl,
-  shouldResetToProductionServiceUrl,
   type DocferrySettings,
-  type ImageUploadQuality
+  type PendingMediaNoteImport
 } from "./settings";
+import { enforceProductionServiceBoundary } from "./service-boundary";
+import { shareMetaBelongsToService } from "./share-url";
 import { ResultModal } from "./result-modal";
 import { ShareModal } from "./share-modal";
-import type { PublishOptions, ShareImportAsset, ShareListItemResponse, SharePayload, ShareResponse } from "./types";
+import { initialExpirySelection, initialThemeStyling } from "./publish-state";
+import { isRemoteUrl } from "./theme-safety";
+import type {
+  FolderShareDocumentPayload,
+  FolderShareResponse,
+  MediaNoteJobResponse,
+  PublishOptions,
+  ShareImportAsset,
+  ShareListItemResponse,
+  SharePayload,
+  ShareResponse
+} from "./types";
 import { confirmDocferryUploadNotice } from "./upload-consent-modal";
+import { resolveVaultDragPath } from "./vault-drag";
+import { safeVaultSegment } from "./vault-filename";
 
 interface UploadedImageAsset {
   assetId: string;
@@ -54,7 +90,7 @@ interface PreparedAssetUpload {
   data: ArrayBuffer;
   filename: string;
   contentType: string;
-  qualityMode: ImageUploadQuality;
+  qualityMode: "original";
 }
 
 interface UploadedCssAsset {
@@ -64,6 +100,12 @@ interface UploadedCssAsset {
 interface HtmlSnapshotResult {
   html: string;
   css: string | null;
+  themeMode: "reader" | "full";
+}
+
+function mediaNoteIdempotencyKey(): string {
+  const uuid = window.crypto?.randomUUID?.();
+  return `plugin-${uuid || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 }
 
 interface OutboundLink {
@@ -79,38 +121,69 @@ type AppWithSetting = App & {
   setting?: {
     open(): void;
     openTabById(id: string): void;
+    close?(): void;
   };
 };
 
 const THEME_CSS_FILENAME = "docferry-obsidian-theme-snapshot.css";
-const MAX_THEME_CSS_BYTES = 256 * 1024;
 const ASSET_UPLOAD_CONCURRENCY = 3;
-const IMAGE_OPTIMIZATION_ENABLED = false;
-const UPLOAD_CONSENT_NOTICE_ID = "docferry-upload-disclosure-v1";
-const PROTOCOL_ACTIONS = ["docferry-auth", "docferry"];
-const IMAGE_QUALITY_PRESETS: Record<ImageUploadQuality, { maxDimension: number | null; quality: number | null }> = {
-  original: { maxDimension: null, quality: null },
-  high: { maxDimension: 2560, quality: 0.92 },
-  standard: { maxDimension: 1600, quality: 0.82 }
-};
+const UPLOAD_CONSENT_NOTICE_ID = "docferry-privacy-security-disclosure-v7";
+const PROTOCOL_ACTIONS = ["docferry"];
+const BILLING_RETURN_REFRESH_WINDOW_MS = 15 * 60 * 1000;
+const BILLING_RETURN_REFRESH_DELAYS_MS = [2000, 5000, 10000, 20000, 30000, 60000, 90000, 120000];
 
 export default class DocferryPlugin extends Plugin {
-  settings!: DocferrySettings;
+  docferrySettings!: DocferrySettings;
   private api!: ShareApiClient;
   private auth!: AuthService;
   private settingTab: DocferrySettingTab | null = null;
   private uploadNoticeOpen = false;
+  private billingReturnRefreshGeneration = 0;
+  private pendingBillingReturnRefreshUntil = 0;
+  private billingReturnRefreshInFlight = false;
+  private billingSessionRecoveryUntil = 0;
+  private activeVaultDragPath = "";
+  private lastActiveMarkdownPath = "";
+  private mediaNoteRecoveryInFlight = false;
+  private shareImportCommitQueue: Promise<void> = Promise.resolve();
 
   async onload(): Promise<void> {
     await this.loadSettings();
-    this.api = new ShareApiClient(() => this.settings, this.manifest.version);
+    this.api = new ShareApiClient(
+      () => this.docferrySettings,
+      this.manifest.version,
+      (error) => this.handleInvalidProductSession(error)
+    );
     this.auth = new AuthService(
       this.api,
       async (token, response) => {
-        this.settings.authMode = "company-sso";
-        this.settings.sessionToken = token;
-        this.settings.apiToken = token;
-        this.settings.connectedAccount = response.product_subject_id
+        this.billingSessionRecoveryUntil = 0;
+        const pending = this.docferrySettings.pendingMediaNoteImport;
+        if (
+          pending &&
+          response.product_subject_id &&
+          pending.ownerProductSubjectId !== response.product_subject_id
+        ) {
+          const previousSessionToken = this.docferrySettings.sessionToken;
+          const previousAccount = this.docferrySettings.connectedAccount;
+          const previousMembership = this.docferrySettings.membership;
+          this.docferrySettings.sessionToken = token;
+          try {
+            await this.api.logout();
+          } catch (error) {
+            this.debug("logout mismatched account session failed", error);
+          } finally {
+            this.docferrySettings.sessionToken = previousSessionToken;
+            this.docferrySettings.connectedAccount = previousAccount;
+            this.docferrySettings.membership = previousMembership;
+            await this.saveSettings();
+          }
+          throw new AuthCompletionError(
+            "This detailed note belongs to another Bondie account. Sign in with the account that started it, then resume or cancel it."
+          );
+        }
+        this.docferrySettings.sessionToken = token;
+        this.docferrySettings.connectedAccount = response.product_subject_id
           ? {
               productSubjectId: response.product_subject_id,
               productKey: response.product_key ?? null,
@@ -129,49 +202,119 @@ export default class DocferryPlugin extends Plugin {
         }
       },
       () => ({
-        clientInstanceId: this.settings.clientInstanceId,
+        clientInstanceId: this.docferrySettings.clientInstanceId,
         pluginVersion: this.manifest.version,
         platform: "obsidian",
         instanceType: "obsidian_plugin"
-      })
+      }),
+      () => ({
+        state: this.docferrySettings.pendingAuthState,
+        startedAt: this.docferrySettings.pendingAuthStartedAt
+      }),
+      async (state, startedAt) => {
+        this.docferrySettings.pendingAuthState = state;
+        this.docferrySettings.pendingAuthStartedAt = startedAt;
+        await this.saveSettings();
+      }
     );
+    void this.auth.resumePendingLogin();
 
     this.settingTab = new DocferrySettingTab(this.app, this);
     this.addSettingTab(this.settingTab);
     this.registerView(DOCFERRY_DASHBOARD_VIEW_TYPE, (leaf) => new DocferryDashboardView(leaf, this));
+    this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
+      if (file instanceof TFolder) {
+        menu.addItem((item) => item
+          .setTitle("Publish folder with DocFerry")
+          .setIcon("folder-up")
+          .onClick(() => void this.publishFolder(file)));
+      }
+    }));
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", (leaf) => {
+        const view = leaf?.view;
+        if (view instanceof MarkdownView && view.file instanceof TFile && view.file.extension === "md") {
+          this.lastActiveMarkdownPath = view.file.path;
+        }
+      })
+    );
     this.addRibbonIcon("ship", "Open dashboard", () => {
-      void this.activateDashboardView();
+      void this.activateDashboardView().then((dashboard) => dashboard?.showHomePage());
     });
     for (const action of PROTOCOL_ACTIONS) {
       this.registerObsidianProtocolHandler(action, async (data) => {
         const params = data as Record<string, string>;
-        if (params.action === "billing-return") {
-          await this.handleBillingReturn(params.status);
+        const callback = classifyProtocolCallback(params);
+        if (callback.kind === "billing-return") {
+          await this.handleBillingReturn(callback.status);
           return;
         }
-        if (params.action === "import" && params.url) {
-          await this.importShareUrl(params.url);
+        if (callback.kind === "import") {
+          await this.importShareUrl(callback.url);
           return;
         }
-        await this.auth.handleProtocolCallback(params);
+        new Notice("This DocFerry link is not supported.");
       });
     }
+    this.registerDomEvent(window, "focus", () => {
+      void this.refreshAfterPendingBillingReturn();
+    });
+    this.registerDomEvent(activeDocument, "visibilitychange", () => {
+      if (activeDocument.visibilityState === "visible") void this.refreshAfterPendingBillingReturn();
+    });
+    this.registerDomEvent(activeDocument, "dragstart", (event: DragEvent) => {
+      const target = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-path]") : null;
+      const path = target?.dataset.path || "";
+      this.activeVaultDragPath = this.app.vault.getAbstractFileByPath(path) ? path : "";
+    }, true);
+    this.registerDomEvent(activeDocument, "dragend", () => {
+      window.setTimeout(() => {
+        this.activeVaultDragPath = "";
+      }, 0);
+    }, true);
 
     this.addCommand({
       id: "open-dashboard",
       name: "Open dashboard",
       callback: () => {
-        void this.activateDashboardView();
+        void this.activateDashboardView().then((dashboard) => dashboard?.showHomePage());
+      }
+    });
+
+    this.addCommand({
+      id: "open-shares",
+      name: "Open shared links",
+      callback: () => {
+        void this.activateDashboardView().then((dashboard) => dashboard?.showSharesPage());
+      }
+    });
+
+    this.addCommand({
+      id: "open-account",
+      name: "Open account",
+      callback: () => {
+        void this.activateDashboardView().then((dashboard) => dashboard?.showAccountPage());
       }
     });
 
     this.addCommand({
       id: "publish-current-note",
-      name: "Share current note",
+      name: "Publish current note",
       checkCallback: (checking) => {
         const file = this.getActiveMarkdownFile();
         if (!file) return false;
         if (!checking) void this.publishFile(file);
+        return true;
+      }
+    });
+
+    this.addCommand({
+      id: "publish-current-folder",
+      name: "Publish current note folder",
+      checkCallback: (checking) => {
+        const folder = this.getActiveMarkdownFile()?.parent;
+        if (!(folder instanceof TFolder)) return false;
+        if (!checking) void this.publishFolder(folder);
         return true;
       }
     });
@@ -193,7 +336,7 @@ export default class DocferryPlugin extends Plugin {
       checkCallback: (checking) => {
         const file = this.getActiveMarkdownFile();
         if (!file) return false;
-        const meta = readShareMeta(this.app, file);
+        const meta = this.currentShareMeta(file);
         if (!meta.id) return false;
         if (!checking) void this.stopSharing(file);
         return true;
@@ -206,7 +349,7 @@ export default class DocferryPlugin extends Plugin {
       checkCallback: (checking) => {
         const file = this.getActiveMarkdownFile();
         if (!file) return false;
-        const meta = readShareMeta(this.app, file);
+        const meta = this.currentShareMeta(file);
         if (!meta.id) return false;
         if (!checking) void this.showLinkStatus(file);
         return true;
@@ -222,6 +365,14 @@ export default class DocferryPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "import-web-link",
+      name: "Import web or media link",
+      callback: () => {
+        void this.activateDashboardView().then((dashboard) => dashboard?.showHomePage());
+      }
+    });
+
+    this.addCommand({
       id: "connect-account",
       name: "Connect account",
       callback: () => {
@@ -229,10 +380,26 @@ export default class DocferryPlugin extends Plugin {
       }
     });
 
+    this.addCommand({
+      id: "create-account",
+      name: "Create Bondie account",
+      callback: () => {
+        void this.startSignup();
+      }
+    });
+
+    this.addCommand({
+      id: "reconnect-account",
+      name: "Reconnect account",
+      callback: () => {
+        void this.reconnectAccount();
+      }
+    });
+
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu, file) => {
         if (!(file instanceof TFile) || file.extension !== "md") return;
-        const meta = readShareMeta(this.app, file);
+        const meta = this.currentShareMeta(file);
         if (meta.id) {
           menu.addItem((item) => {
             item.setTitle("Update share link")
@@ -256,7 +423,7 @@ export default class DocferryPlugin extends Plugin {
           });
         } else {
           menu.addItem((item) => {
-            item.setTitle("Share thru Docferry")
+            item.setTitle("Publish share link")
               .setIcon("share")
               .onClick(() => void this.publishFile(file));
           });
@@ -264,6 +431,10 @@ export default class DocferryPlugin extends Plugin {
       })
     );
     this.app.workspace.onLayoutReady(() => {
+      if (this.docferrySettings.sessionToken) this.refreshMembershipForDashboardOpen();
+      if (this.docferrySettings.sessionToken && this.docferrySettings.pendingMediaNoteImport) {
+        window.setTimeout(() => void this.resumeActiveMediaImport(), 900);
+      }
       window.setTimeout(() => {
         void this.showUploadNoticeIfNeeded(false);
       }, 600);
@@ -271,68 +442,57 @@ export default class DocferryPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    const loadedSettings = (await this.loadData()) as Partial<DocferrySettings> | null;
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, loadedSettings ?? {});
-    let changed = false;
-    if (!this.settings.clientInstanceId) {
-      this.settings.clientInstanceId = `obs_${crypto.randomUUID()}`;
-      changed = true;
+    const loadedSettings = (await this.loadData()) as Record<string, unknown> | null;
+    const allowedKeys = new Set(Object.keys(DEFAULT_SETTINGS));
+    const settingsRecord = { ...DEFAULT_SETTINGS } as DocferrySettings & Record<string, unknown>;
+    for (const key of allowedKeys) {
+      if (loadedSettings && Object.prototype.hasOwnProperty.call(loadedSettings, key)) {
+        settingsRecord[key] = loadedSettings[key];
+      }
     }
-    if (
-      this.settings.authMode === "manual-token" &&
-      this.settings.apiToken &&
-      !this.settings.manualApiToken &&
-      !this.settings.sessionToken
-    ) {
-      this.settings.manualApiToken = this.settings.apiToken;
-      changed = true;
-    }
-    if (!MANUAL_TOKEN_ENTRY_ENABLED && this.settings.authMode === "manual-token") {
-      this.settings.authMode = "company-sso";
-      changed = true;
-    }
-    if (shouldResetToProductionServiceUrl(this.settings)) {
-      resetToProductionServiceUrl(this.settings);
+    this.docferrySettings = settingsRecord;
+    let changed = Boolean(loadedSettings && Object.keys(loadedSettings).some((key) => !allowedKeys.has(key)));
+    changed = enforceProductionServiceBoundary(this.docferrySettings, DEFAULT_SETTINGS.serverUrl) || changed;
+    if (!this.docferrySettings.clientInstanceId) {
+      this.docferrySettings.clientInstanceId = `obs_${crypto.randomUUID()}`;
       changed = true;
     }
     const normalizedImportFolder =
-      normalizeVaultFolder(this.settings.defaultImportFolder) || DEFAULT_SETTINGS.defaultImportFolder;
-    if (this.settings.defaultImportFolder !== normalizedImportFolder) {
-      this.settings.defaultImportFolder = normalizedImportFolder;
+      normalizeVaultFolder(this.docferrySettings.defaultImportFolder) || DEFAULT_SETTINGS.defaultImportFolder;
+    if (this.docferrySettings.defaultImportFolder !== normalizedImportFolder) {
+      this.docferrySettings.defaultImportFolder = normalizedImportFolder;
+      changed = true;
+    }
+    const pendingImport = this.docferrySettings.pendingMediaNoteImport;
+    if (
+      pendingImport &&
+      (!pendingImport.jobId || !pendingImport.ownerProductSubjectId || !pendingImport.sourceUrl)
+    ) {
+      this.docferrySettings.pendingMediaNoteImport = null;
       changed = true;
     }
     if (changed) await this.saveSettings();
   }
 
   async saveSettings(): Promise<void> {
-    await this.saveData(this.settings);
+    await this.saveData(this.docferrySettings);
   }
 
   async testConnection(): Promise<void> {
     try {
       await this.api.health();
-      if (this.settings.authMode === "manual-token") {
-        if (!this.settings.manualApiToken && !this.settings.apiToken) {
-          new Notice("DocFerry server is reachable, but API token is missing.");
-          return;
-        }
-        await this.api.validateAuthToken();
-        new Notice("DocFerry server is reachable. API token is valid.");
-        this.refreshDashboardAuth();
-        return;
-      }
-      if (!this.settings.sessionToken) {
-        new Notice("DocFerry server is reachable, but no Fuyonder account is connected.");
+      if (!this.docferrySettings.sessionToken) {
+        new Notice("DocFerry server is reachable, but no Bondie account is connected.");
         return;
       }
       const account = await this.api.whoami();
       if (account.product_subject_id) {
-        this.settings.connectedAccount = {
+        this.docferrySettings.connectedAccount = {
           productSubjectId: account.product_subject_id,
           productKey: account.product_key ?? null,
           productInstanceId: account.product_instance_id ?? null,
-          displayUser: account.display_user ?? this.settings.connectedAccount?.displayUser ?? null,
-          connectedAt: this.settings.connectedAccount?.connectedAt ?? new Date().toISOString()
+          displayUser: account.display_user ?? this.docferrySettings.connectedAccount?.displayUser ?? null,
+          connectedAt: this.docferrySettings.connectedAccount?.connectedAt ?? new Date().toISOString()
         };
         await this.saveSettings();
         this.settingTab?.refreshForAuthChange();
@@ -344,20 +504,17 @@ export default class DocferryPlugin extends Plugin {
         }
       }
       const displayName =
-        this.settings.connectedAccount?.displayUser?.name ||
-        this.settings.connectedAccount?.displayUser?.email ||
-        this.settings.connectedAccount?.productSubjectId.slice(-8) ||
-        "Fuyonder account";
-      new Notice(`DocFerry server is reachable. Signed in as ${displayName}.`);
-    } catch (error) {
-      if (error instanceof ShareApiError && error.status === 401) {
-        const message =
-          this.settings.authMode === "company-sso"
-            ? "Server is reachable, but the Fuyonder session is invalid. Reconnect your account."
-            : "Server is reachable, but the API token is invalid.";
-        new Notice(message);
+        this.docferrySettings.connectedAccount?.displayUser?.name ||
+        this.docferrySettings.connectedAccount?.displayUser?.email ||
+        this.docferrySettings.connectedAccount?.productSubjectId.slice(-8) ||
+        "Bondie account";
+      if (account.billing_session_ready === false) {
+        new Notice(`DocFerry server is reachable. Signed in as ${displayName}; reconnect before managing billing.`);
         return;
       }
+      new Notice(`DocFerry server is reachable. Signed in as ${displayName}.`);
+    } catch (error) {
+      if (isInvalidProductSessionError(error)) return;
       new Notice(this.formatError(error, "Connection failed"));
     }
   }
@@ -366,102 +523,216 @@ export default class DocferryPlugin extends Plugin {
     await this.auth.startLogin();
   }
 
-  async disconnectAccount(): Promise<void> {
-    try {
-      if (this.settings.sessionToken) await this.api.logout();
-    } catch (error) {
-      this.debug("logout failed", error);
-    }
-    this.settings.sessionToken = "";
-    this.settings.connectedAccount = null;
-    this.settings.membership = null;
-    if (this.settings.authMode === "company-sso") this.settings.apiToken = "";
+  async startSignup(): Promise<void> {
+    if (!(await this.finishPendingImportBeforeAccountChange())) return;
+    if (!(await this.logoutBeforeAccountChange())) return;
+    this.clearLocalBondieAccount();
     await this.saveSettings();
     this.settingTab?.refreshForAuthChange();
     this.refreshDashboardAuth();
-    new Notice("Fuyonder account disconnected.");
+    await this.auth.startLogin({ signup: true });
+  }
+
+  async reconnectAccount(): Promise<void> {
+    if (!(await this.finishPendingImportBeforeAccountChange())) return;
+    if (!(await this.logoutBeforeAccountChange())) return;
+    this.clearLocalBondieAccount();
+    await this.saveSettings();
+    this.settingTab?.refreshForAuthChange();
+    this.refreshDashboardAuth();
+    await this.auth.startLogin({ promptLogin: true });
+  }
+
+  private async logoutBeforeAccountChange(): Promise<boolean> {
+    if (!this.docferrySettings.sessionToken) return true;
+    try {
+      await this.api.logout();
+      return true;
+    } catch (error) {
+      if (isInvalidProductSessionError(error)) return true;
+      new Notice(this.formatError(error, "Could not switch accounts"));
+      return false;
+    }
+  }
+
+  async disconnectAccount(): Promise<void> {
+    if (!(await this.finishPendingImportBeforeAccountChange())) return;
+    if (this.docferrySettings.sessionToken) {
+      try {
+        await this.api.logout();
+      } catch (error) {
+        if (!isInvalidProductSessionError(error)) {
+          new Notice(this.formatError(error, "Could not disconnect"));
+          return;
+        }
+      }
+    }
+    this.clearLocalBondieAccount();
+    await this.saveSettings();
+    this.settingTab?.refreshForAuthChange();
+    this.refreshDashboardAuth();
+    new Notice("Bondie account disconnected.");
+  }
+
+  private async finishPendingImportBeforeAccountChange(): Promise<boolean> {
+    if (!this.docferrySettings.pendingMediaNoteImport) return true;
+    try {
+      await this.cancelActiveMediaImport();
+    } catch (error) {
+      new Notice(this.formatError(error, "Could not cancel the current detailed note"), 8000);
+      return false;
+    }
+    if (!this.docferrySettings.pendingMediaNoteImport) return true;
+    new Notice("Finish or cancel the current detailed note before changing Bondie accounts.", 8000);
+    return false;
+  }
+
+  private clearLocalBondieAccount(preservePendingImport = false): void {
+    this.billingReturnRefreshGeneration++;
+    this.clearPendingBillingReturnRefresh();
+    this.docferrySettings.sessionToken = "";
+    this.docferrySettings.connectedAccount = null;
+    this.docferrySettings.membership = null;
+    if (!preservePendingImport) this.docferrySettings.pendingMediaNoteImport = null;
+  }
+
+  private handleInvalidProductSession(error: unknown): void {
+    if (!isInvalidProductSessionError(error)) return;
+    if (!this.docferrySettings.sessionToken && !this.docferrySettings.connectedAccount && !this.docferrySettings.membership) return;
+    this.clearLocalBondieAccount(true);
+    this.settingTab?.refreshForAuthChange();
+    this.refreshDashboardAuth();
+    void this.saveSettings().catch((saveError) => this.debug("invalid session cleanup failed", saveError));
+    new Notice("Your Bondie session ended. Log in again.");
   }
 
   async listShares(): Promise<ShareListItemResponse[]> {
-    const response = await this.api.listShares();
-    return response.shares;
+    try {
+      const response = await this.api.listShares();
+      return response.shares;
+    } catch (error) {
+      if (isInvalidProductSessionError(error)) return [];
+      throw error;
+    }
+  }
+
+  async listFolderShares(): Promise<FolderShareResponse[]> {
+    if (!this.docferrySettings.sessionToken) return [];
+    const response = await this.api.listFolderShares();
+    return response.folder_shares;
+  }
+
+  async stopFolderShareFromList(folderShare: FolderShareResponse): Promise<void> {
+    const confirmed = await confirmStopShare(this.app, folderShare.title, folderShare.source_folder);
+    if (!confirmed) return;
+    await this.api.deleteFolderShare(folderShare.folder_share_id);
+    new Notice("Folder share stopped.");
+    this.refreshDashboardShare();
+  }
+
+  async deleteShareHistory(share: ShareListItemResponse): Promise<void> {
+    const confirmed = await confirmDeleteShareHistory(this.app, share.title || share.source_path, share.source_path);
+    if (!confirmed) return;
+    await this.api.deleteShareRecord(share.share_id);
+    new Notice("Share history deleted.");
+    this.refreshDashboardShare();
+  }
+
+  async deleteFolderShareHistory(folderShare: FolderShareResponse): Promise<void> {
+    const confirmed = await confirmDeleteShareHistory(this.app, folderShare.title, folderShare.source_folder);
+    if (!confirmed) return;
+    await this.api.deleteFolderShareRecord(folderShare.folder_share_id);
+    new Notice("Folder share history deleted.");
+    this.refreshDashboardShare();
   }
 
   async refreshMembership(force = false): Promise<void> {
-    if (this.settings.authMode !== "company-sso" || !this.settings.sessionToken) {
-      new Notice("Connect your Fuyonder account first.");
+    if (!this.docferrySettings.sessionToken) {
+      const opened = await this.auth.startLogin();
+      if (opened) new Notice("Finish signing in in your browser, then return to share this note.");
       return;
     }
     try {
       await this.loadMembership(force);
       new Notice("Access refreshed.");
     } catch (error) {
+      if (this.isBillingSessionRequired(error)) {
+        await this.recoverBillingSession(true);
+        return;
+      }
+      if (isInvalidProductSessionError(error)) return;
       new Notice(this.formatError(error, "Access refresh failed"));
     }
   }
 
   async openMembershipCenter(): Promise<void> {
-    if (!this.settings.serverUrl) {
+    if (!this.docferrySettings.serverUrl) {
       new Notice("Configure server URL first.");
       return;
     }
-    if (this.settings.authMode === "company-sso" && !this.settings.sessionToken) {
-      new Notice("Connect your Fuyonder account first.");
+    if (!this.docferrySettings.sessionToken) {
+      const opened = await this.auth.startLogin();
+      if (opened) new Notice("Finish signing in in your browser, then return to share this folder.");
       return;
     }
-    const fallbackUrl = `${this.settings.serverUrl.replace(/\/+$/, "")}/dashboard/plans?refresh_membership=1`;
-    if (this.settings.authMode === "company-sso" && this.settings.sessionToken) {
+    const fallbackUrl = `${this.docferrySettings.serverUrl.replace(/\/+$/, "")}/dashboard/plans?refresh_membership=1`;
+    this.markPendingBillingReturnRefresh();
+    if (this.docferrySettings.sessionToken) {
       try {
         const link = await this.api.createDashboardLink("/dashboard/plans?refresh_membership=1");
-        window.open(link.dashboard_url);
+        openExternalUrl(link.dashboard_url);
         new Notice("DocFerry access page opened in your browser.");
         return;
       } catch (error) {
-        new Notice(this.formatError(error, "Access page needs reconnect"));
+        if (!isInvalidProductSessionError(error)) {
+          new Notice(this.formatError(error, "Access page needs reconnect"));
+        }
       }
     }
-    window.open(fallbackUrl);
+    openExternalUrl(fallbackUrl);
   }
 
   async openDashboardHome(): Promise<void> {
-    if (!this.settings.serverUrl) {
+    if (!this.docferrySettings.serverUrl) {
       new Notice("Configure server URL first.");
       return;
     }
-    const fallbackUrl = `${this.settings.serverUrl.replace(/\/+$/, "")}/dashboard`;
-    if (this.settings.authMode === "company-sso" && this.settings.sessionToken) {
+    const fallbackUrl = `${this.docferrySettings.serverUrl.replace(/\/+$/, "")}/dashboard`;
+    if (this.docferrySettings.sessionToken) {
       try {
         const link = await this.api.createDashboardLink("/dashboard");
-        window.open(link.dashboard_url);
+        openExternalUrl(link.dashboard_url);
         return;
       } catch (error) {
         this.debug("dashboard link failed", error);
       }
     }
-    window.open(fallbackUrl);
+    openExternalUrl(fallbackUrl);
   }
 
   async requestAccessUpgrade(source: "plugin_settings" | "plugin_dashboard"): Promise<void> {
-    if (this.settings.authMode !== "company-sso" || !this.settings.sessionToken) {
-      new Notice("Connect your Fuyonder account before requesting access.");
+    if (!this.docferrySettings.sessionToken) {
+      new Notice("Connect your Bondie account before sending feedback.");
       return;
     }
     try {
-      const target = "/dashboard/plans?refresh_membership=1#access-request";
+      const target = "/dashboard/support#feedback";
       const link = await this.api.createDashboardLink(target);
-      window.open(link.dashboard_url);
-      new Notice("Access request form opened in your browser.");
+      openExternalUrl(link.dashboard_url);
+      new Notice("Feedback page opened in your browser.");
     } catch (error) {
-      new Notice(this.formatError(error, "Access request needs reconnect"));
+      if (isInvalidProductSessionError(error)) return;
+      new Notice(this.formatError(error, "Feedback page needs reconnect"));
     }
   }
 
-  async activateDashboardView(): Promise<DocferryDashboardView | null> {
+  async activateDashboardView(refreshMembership = true): Promise<DocferryDashboardView | null> {
+    this.rememberActiveMarkdownFile();
     const existingLeaf = this.app.workspace.getLeavesOfType(DOCFERRY_DASHBOARD_VIEW_TYPE)[0];
     if (existingLeaf) {
       await this.app.workspace.revealLeaf(existingLeaf);
       const view = existingLeaf.view instanceof DocferryDashboardView ? existingLeaf.view : null;
-      this.refreshMembershipForDashboardOpen();
+      if (refreshMembership) this.refreshMembershipForDashboardOpen();
       return view;
     }
 
@@ -469,7 +740,7 @@ export default class DocferryPlugin extends Plugin {
     await leaf.setViewState({ type: DOCFERRY_DASHBOARD_VIEW_TYPE, active: true });
     await this.app.workspace.revealLeaf(leaf);
     const view = leaf.view instanceof DocferryDashboardView ? leaf.view : null;
-    this.refreshMembershipForDashboardOpen();
+    if (refreshMembership) this.refreshMembershipForDashboardOpen();
     return view;
   }
 
@@ -483,22 +754,62 @@ export default class DocferryPlugin extends Plugin {
     app.setting.openTabById(this.manifest.id);
   }
 
+  async openSharesPage(): Promise<void> {
+    const app = this.app as AppWithSetting;
+    app.setting?.close?.();
+    const dashboard = await this.activateDashboardView();
+    dashboard?.showSharesPage();
+  }
+
+  getActiveNoteLabel(): string | null {
+    return this.getActiveMarkdownFile()?.basename ?? null;
+  }
+
+  async publishActiveNote(): Promise<void> {
+    const file = this.getActiveMarkdownFile();
+    if (!file) {
+      new Notice("Open a Markdown note before sharing.");
+      return;
+    }
+    await this.publishFile(file);
+  }
+
   async openShareLinks(share: ShareListItemResponse): Promise<void> {
     try {
       const response = await this.api.getShareLinks(share.share_id);
       new LinkStatusModal(this.app, share.title || share.source_path, response).open();
     } catch (error) {
+      if (isInvalidProductSessionError(error)) return;
       new Notice(this.formatError(error, "Link status failed"));
     }
   }
 
   async updateShareFromList(share: ShareListItemResponse): Promise<void> {
+    const vaultId = await this.resolveVaultId();
+    if (!share.vault_id || share.vault_id !== vaultId) {
+      new Notice("Open the source vault to update that share.");
+      return;
+    }
     const file = this.markdownFileByPath(share.source_path);
     if (!file) {
       new Notice("Open the source note in this vault to update that share.");
       return;
     }
-    await this.publishFile(file);
+    await this.publishFile(file, share);
+  }
+
+  async updateFolderShareFromList(folderShare: FolderShareResponse): Promise<void> {
+    const vaultId = await this.resolveVaultId();
+    if (folderShare.vault_id !== vaultId) {
+      new Notice("Open the source vault to update that folder share.");
+      return;
+    }
+    const folder = this.app.vault.getAbstractFileByPath(folderShare.source_folder);
+    if (!(folder instanceof TFolder)) {
+      new Notice("Open the source folder in this vault to update that share.");
+      return;
+    }
+    await this.publishFolder(folder);
   }
 
   async stopShareFromList(share: ShareListItemResponse): Promise<void> {
@@ -509,25 +820,25 @@ export default class DocferryPlugin extends Plugin {
       await this.api.deleteShare(share.share_id);
       const file = this.markdownFileByPath(share.source_path);
       if (file) {
-        const meta = readShareMeta(this.app, file);
+        const meta = this.currentShareMeta(file);
         if (meta.id === share.share_id) await clearShareMeta(this.app, file);
       }
-      this.settingTab?.refreshForShareChange();
       this.refreshDashboardShare();
       notice.hide();
       new Notice("Share stopped. The link is no longer available.");
     } catch (error) {
       notice.hide();
+      if (isInvalidProductSessionError(error)) return;
       new Notice(this.formatError(error, "Stop sharing failed"));
     }
   }
 
   private async loadMembership(force: boolean): Promise<void> {
     const response = await this.api.getMembership(force);
-    if (this.settings.authMode === "company-sso" && response.product_subject_id) {
-      const current = this.settings.connectedAccount;
+    if (response.product_subject_id) {
+      const current = this.docferrySettings.connectedAccount;
       if (!current || current.productSubjectId !== response.product_subject_id) {
-        this.settings.connectedAccount = {
+        this.docferrySettings.connectedAccount = {
           productSubjectId: response.product_subject_id,
           productKey: response.product_key,
           productInstanceId: current?.productInstanceId ?? null,
@@ -536,122 +847,484 @@ export default class DocferryPlugin extends Plugin {
         };
       }
     }
-    this.settings.membership = membershipFromResponse(response);
+    this.docferrySettings.membership = membershipFromResponse(response);
     await this.saveSettings();
     this.settingTab?.refreshForAuthChange();
     this.refreshDashboardAuth();
+    if (response.unavailable_reason === "synapsehub_user_session_required") {
+      throw new ShareApiError(
+        "Reconnect your Bondie account before refreshing paid access.",
+        401,
+        response.unavailable_reason
+      );
+    }
   }
 
   refreshMembershipForDashboardOpen(): void {
-    if (this.settings.authMode !== "company-sso" || !this.settings.sessionToken) return;
-    void this.loadMembership(true).catch((error) => this.debug("dashboard membership refresh failed", error));
+    if (!this.docferrySettings.sessionToken) return;
+    void this.loadMembership(true).catch(async (error) => {
+      if (this.isBillingSessionRequired(error)) {
+        await this.recoverBillingSession();
+        return;
+      }
+      if (isInvalidProductSessionError(error)) return;
+      this.debug("dashboard membership refresh failed", error);
+    });
   }
 
   private async handleBillingReturn(status?: string): Promise<void> {
-    const dashboard = await this.activateDashboardView();
+    const dashboard = await this.activateDashboardView(false);
     dashboard?.showAccountPage();
     if (status === "cancel") {
+      this.clearPendingBillingReturnRefresh();
       new Notice("Checkout cancelled. Access was not changed.");
       try {
         await this.loadMembership(true);
       } catch (error) {
+        if (this.isBillingSessionRequired(error)) {
+          await this.recoverBillingSession();
+          return;
+        }
+        if (isInvalidProductSessionError(error)) return;
         new Notice(this.formatError(error, "Access refresh failed"));
       }
       dashboard?.showAccountPage();
       return;
     }
+    this.clearPendingBillingReturnRefresh();
     new Notice("Payment returned. Refreshing access...");
-    this.scheduleMembershipRefreshes();
     try {
       await this.loadMembership(true);
       dashboard?.showAccountPage();
-      const membership = this.settings.membership;
+      const membership = this.docferrySettings.membership;
       if (membership && membership.planKey !== "free") {
         new Notice(`Access active: ${membership.planDisplayName}.`);
       } else {
         new Notice("Access still shows Free. DocFerry will keep refreshing while the account update completes.", 8000);
+        this.scheduleMembershipRefreshes();
       }
     } catch (error) {
+      if (this.isBillingSessionRequired(error)) {
+        await this.recoverBillingSession();
+        return;
+      }
+      if (isInvalidProductSessionError(error)) return;
       new Notice(this.formatError(error, "Access refresh failed"));
+      this.scheduleMembershipRefreshes();
     }
   }
 
+  private async refreshAfterPendingBillingReturn(): Promise<void> {
+    if (!this.pendingBillingReturnRefreshUntil || Date.now() > this.pendingBillingReturnRefreshUntil) {
+      this.clearPendingBillingReturnRefresh();
+      return;
+    }
+    if (this.billingReturnRefreshInFlight) return;
+    if (!this.docferrySettings.sessionToken) return;
+    this.clearPendingBillingReturnRefresh();
+    this.billingReturnRefreshInFlight = true;
+    try {
+      const dashboard = await this.activateDashboardView(false);
+      dashboard?.showAccountPage();
+      await this.loadMembership(true);
+      const membership = this.docferrySettings.membership;
+      if (membership && membership.planKey !== "free") {
+        new Notice(`Access active: ${membership.planDisplayName}.`);
+      } else {
+        new Notice("Refreshing access after billing. DocFerry will check again while the account update completes.", 8000);
+        this.scheduleMembershipRefreshes();
+      }
+    } catch (error) {
+      if (this.isBillingSessionRequired(error)) {
+        await this.recoverBillingSession();
+        return;
+      }
+      if (isInvalidProductSessionError(error)) return;
+      this.debug("billing return focus refresh failed", error);
+      this.scheduleMembershipRefreshes();
+    } finally {
+      this.billingReturnRefreshInFlight = false;
+    }
+  }
+
+  private markPendingBillingReturnRefresh(): void {
+    if (!this.docferrySettings.sessionToken) return;
+    this.pendingBillingReturnRefreshUntil = Date.now() + BILLING_RETURN_REFRESH_WINDOW_MS;
+  }
+
+  private clearPendingBillingReturnRefresh(): void {
+    this.pendingBillingReturnRefreshUntil = 0;
+  }
+
   private scheduleMembershipRefreshes(): void {
-    if (this.settings.authMode !== "company-sso" || !this.settings.sessionToken) return;
-    for (const delayMs of [5000, 15000, 30000, 60000]) {
-      window.setTimeout(() => {
-        void this.loadMembership(true).catch((error) => this.debug("scheduled membership refresh failed", error));
+    if (!this.docferrySettings.sessionToken) return;
+    const generation = ++this.billingReturnRefreshGeneration;
+    for (const delayMs of BILLING_RETURN_REFRESH_DELAYS_MS) {
+      window.setTimeout(async () => {
+        if (generation !== this.billingReturnRefreshGeneration) return;
+        try {
+          await this.loadMembership(true);
+          const membership = this.docferrySettings.membership;
+          if (membership && membership.planKey !== "free") {
+            this.billingReturnRefreshGeneration++;
+            new Notice(`Access active: ${membership.planDisplayName}.`);
+          }
+        } catch (error) {
+          if (this.isBillingSessionRequired(error)) {
+            await this.recoverBillingSession();
+            return;
+          }
+          if (isInvalidProductSessionError(error)) return;
+          this.debug("scheduled membership refresh failed", error);
+        }
       }, delayMs);
     }
   }
 
-  private getActiveMarkdownFile(): TFile | null {
-    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (view?.file instanceof TFile && view.file.extension === "md") return view.file;
-    const file = this.app.workspace.getActiveFile();
-    return file instanceof TFile && file.extension === "md" ? file : null;
+  private isBillingSessionRequired(error: unknown): boolean {
+    if (error instanceof ShareApiError) return error.code === "synapsehub_user_session_required";
+    if (!error || typeof error !== "object") return false;
+    return "code" in error && error.code === "synapsehub_user_session_required";
   }
 
-  private async publishFile(file: TFile): Promise<void> {
-    if (!this.settings.serverUrl) {
+  private async recoverBillingSession(force = false): Promise<void> {
+    if (!force && Date.now() < this.billingSessionRecoveryUntil) {
+      new Notice("Finishing the secure account refresh in your browser.");
+      return;
+    }
+    this.billingSessionRecoveryUntil = Date.now() + 60_000;
+    this.markPendingBillingReturnRefresh();
+    new Notice("Refreshing your Bondie account securely...");
+    const opened = await this.auth.startLogin();
+    if (!opened) this.billingSessionRecoveryUntil = 0;
+  }
+
+  private getActiveMarkdownFile(): TFile | null {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (view?.file instanceof TFile && view.file.extension === "md") {
+      this.lastActiveMarkdownPath = view.file.path;
+      return view.file;
+    }
+    if (this.lastActiveMarkdownPath) {
+      const remembered = this.app.vault.getAbstractFileByPath(this.lastActiveMarkdownPath);
+      if (remembered instanceof TFile && remembered.extension === "md") return remembered;
+      this.lastActiveMarkdownPath = "";
+    }
+    const file = this.app.workspace.getActiveFile();
+    if (file instanceof TFile && file.extension === "md") {
+      this.lastActiveMarkdownPath = file.path;
+      return file;
+    }
+    for (const recentPath of this.app.workspace.getLastOpenFiles()) {
+      const recent = this.app.vault.getAbstractFileByPath(recentPath);
+      if (recent instanceof TFile && recent.extension === "md") {
+        this.lastActiveMarkdownPath = recent.path;
+        return recent;
+      }
+    }
+    return null;
+  }
+
+  private rememberActiveMarkdownFile(): void {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const file = view?.file instanceof TFile ? view.file : this.app.workspace.getActiveFile();
+    if (file instanceof TFile && file.extension === "md") this.lastActiveMarkdownPath = file.path;
+  }
+
+  private async publishFile(file: TFile, selectedShare?: ShareListItemResponse): Promise<void> {
+    if (!this.docferrySettings.serverUrl) {
       new Notice("Configure server URL first.");
       return;
     }
 
-    if (this.settings.authMode === "manual-token" && !this.settings.manualApiToken && !this.settings.apiToken) {
-      new Notice("Configure API token first.");
-      return;
-    }
-    if (this.settings.authMode === "company-sso" && !this.settings.sessionToken) {
-      new Notice("Connect your Fuyonder account first.");
+    if (!this.docferrySettings.sessionToken) {
+      new Notice("Connect your Bondie account first.");
       return;
     }
     const uploadNoticeAccepted = await this.showUploadNoticeIfNeeded(true);
     if (!uploadNoticeAccepted) return;
 
-    const existing = readShareMeta(this.app, file);
+    try {
+      await this.loadMembership(true);
+    } catch (error) {
+      if (this.isBillingSessionRequired(error)) {
+        await this.recoverBillingSession(true);
+        return;
+      }
+      new Notice(this.formatError(error, "Access check failed"));
+      return;
+    }
+
+    const existing = this.currentShareMeta(file);
+    let existingShare: Pick<
+      ShareListItemResponse,
+      "share_id" | "password_enabled" | "expires_at" | "theme_mode"
+    > | null = selectedShare ?? null;
+    if (!existingShare && existing.id) {
+      try {
+        existingShare = await this.api.getShareStatus(existing.id);
+      } catch (error) {
+        if (isInvalidProductSessionError(error)) return;
+        new Notice(this.formatError(error, "Could not load the current share settings"));
+        return;
+      }
+    }
+    const existingShareId = existingShare?.share_id ?? existing.id;
+    const existingExpiresAt = existingShare?.expires_at ?? existing.expires ?? null;
     const title = this.resolveTitle(file);
+    const canUseThemeStyling = Boolean(this.docferrySettings.membership?.canUseFullTheme);
     const modal = new ShareModal(this.app, {
       title,
-      passwordEnabled: existing.passwordEnabled ?? this.settings.defaultPasswordEnabled,
-      expiresInDays: this.settings.defaultExpiresInDays,
-      isUpdate: !!existing.id
+      passwordEnabled:
+        existingShare?.password_enabled ?? existing.passwordEnabled ?? this.docferrySettings.defaultPasswordEnabled,
+      passwordAlreadySet: Boolean(existingShare?.password_enabled ?? existing.passwordEnabled),
+      expiresInDays: initialExpirySelection(existingExpiresAt, this.docferrySettings.defaultExpiresInDays),
+      existingExpiresAt,
+      isUpdate: Boolean(existingShareId),
+      canUseThemeStyling,
+      useThemeStyling: initialThemeStyling(
+        canUseThemeStyling,
+        existingShare?.theme_mode,
+        Boolean(existingShareId)
+      )
     });
     const options = await modal.openAndGetResult();
     if (!options) return;
 
-    const notice = new Notice(existing.id ? "Updating share link..." : "Publishing share link...", 0);
+    const notice = new Notice(existingShareId ? "Updating share link..." : "Publishing share link...", 0);
     try {
       notice.setMessage("Checking access limits...");
-      await this.ensureCanPublishBeforeUpload(file, !!existing.id);
-      const payload = await this.buildPayload(file, options.title, options, !!existing.id, (message) => {
+      await this.ensureCanPublishBeforeUpload(file, Boolean(existingShareId));
+      const payload = await this.buildPayload(file, options.title, options, Boolean(existingShareId), (message) => {
         notice.setMessage(message);
       });
-      notice.setMessage(existing.id ? "Updating share link..." : "Publishing share link...");
-      const response = existing.id
-        ? await this.updateOrCreateShare(existing.id, payload, notice)
+      notice.setMessage(existingShareId ? "Updating share link..." : "Publishing share link...");
+      const response = existingShareId
+        ? await this.updateOrCreateShare(existingShareId, payload, notice)
         : await this.api.createShare(payload);
 
       await writeShareMeta(this.app, file, response, {
         passwordEnabled: options.passwordEnabled,
         expiresAt: options.expiresAt
       });
-      await navigator.clipboard.writeText(response.url);
       notice.hide();
-      new Notice("Share link copied");
+      try {
+        await navigator.clipboard.writeText(response.url);
+        new Notice("Share link copied");
+      } catch {
+        new Notice("Share updated, but the link could not be copied. Copy it from the result window.");
+      }
       new ResultModal(this.app, options.title, response.url, response.updated_at).open();
-      this.settingTab?.refreshForShareChange();
       this.refreshDashboardShare();
-      this.debug("publish response", response);
+      this.debug("publish response", response.status);
     } catch (error) {
       notice.hide();
+      if (isInvalidProductSessionError(error)) return;
       new Notice(this.formatError(error, "Publish failed"));
       this.debug("publish error", error);
     }
   }
 
+  private async publishFolder(folder: TFolder): Promise<void> {
+    if (!folder.path || folder.path === "/") {
+      new Notice("Choose a folder inside the vault instead of the entire vault.");
+      return;
+    }
+    if (!this.docferrySettings.serverUrl) {
+      new Notice("Configure server URL first.");
+      return;
+    }
+    if (!this.docferrySettings.sessionToken) {
+      new Notice("Connect your Bondie account first.");
+      return;
+    }
+    const files = this.markdownFilesInFolder(folder);
+    if (!files.length) {
+      new Notice("This folder has no Markdown notes to publish.");
+      return;
+    }
+    const uploadNoticeAccepted = await this.showUploadNoticeIfNeeded(true);
+    if (!uploadNoticeAccepted) return;
+    try {
+      await this.loadMembership(true);
+    } catch (error) {
+      if (!this.isBillingSessionRequired(error)) {
+        new Notice(this.formatError(error, "Access check failed"));
+        return;
+      }
+      await this.recoverBillingSession(true);
+      return;
+    }
+    const membership = this.docferrySettings.membership;
+    if (folderShareAccess(membership, false) === "upgrade_required") {
+      new Notice("Folder sharing is available with DocFerry Pro.");
+      return;
+    }
+    if (!membership) return;
+    if (files.length > membership.maxFolderDocumentCount) {
+      new Notice(`This folder has ${files.length} notes. Your plan allows ${membership.maxFolderDocumentCount}.`);
+      return;
+    }
+    const vaultId = await this.resolveVaultId();
+    const existingFolder = (await this.api.listFolderShares()).folder_shares.find((item) =>
+      item.vault_id === vaultId &&
+      item.source_folder === folder.path &&
+      item.status !== "stopped" &&
+      item.status !== "expired"
+    );
+    if (folderShareAccess(membership, Boolean(existingFolder)) === "limit_reached") {
+      new Notice(
+        `Your plan allows ${membershipLimitLabel(membership.activeFolderShareLimit)} active folder shares. Stop one before publishing another.`
+      );
+      return;
+    }
+
+    const options = await new FolderShareModal(this.app, {
+      title: existingFolder?.title || folder.name || this.app.vault.getName(),
+      passwordEnabled: existingFolder?.password_enabled ?? this.docferrySettings.defaultPasswordEnabled,
+      passwordAlreadySet: Boolean(existingFolder?.password_enabled),
+      expiresInDays: initialExpirySelection(existingFolder?.expires_at, this.docferrySettings.defaultExpiresInDays),
+      existingExpiresAt: existingFolder?.expires_at ?? null,
+      documentCount: files.length,
+      isUpdate: Boolean(existingFolder),
+      canUseThemeStyling: membership.canUseFullTheme,
+      useThemeStyling: membership.canUseFullTheme && (existingFolder?.theme_mode ?? "full") === "full"
+    }).openAndGetResult();
+    if (!options) return;
+
+    const notice = new Notice("Preparing folder share...", 0);
+    try {
+      const draft = await this.api.createFolderShareDraft({
+        folder_share_id: existingFolder?.folder_share_id ?? null,
+        vault_id: vaultId,
+        source_folder: folder.path,
+        title: options.title,
+        expected_document_count: files.length,
+        theme_mode: options.useThemeStyling && membership.canUseFullTheme ? "full" : "reader",
+        css_asset_id: null,
+        client: {
+          plugin_id: this.manifest.id,
+          plugin_version: this.manifest.version,
+          obsidian_version: getObsidianVersion(this.app),
+          vault_name: this.app.vault.getName()
+        }
+      });
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        notice.setMessage(`Publishing ${index + 1} of ${files.length}: ${file.basename}`);
+        const documentPayload = await this.buildFolderDocumentPayload(
+          folder,
+          file,
+          index,
+          options.useThemeStyling && membership.canUseFullTheme
+        );
+        await this.api.putFolderShareDocument(draft.revision_id, documentPayload.route_key, documentPayload);
+      }
+      notice.setMessage("Opening folder share...");
+      const response = await this.api.commitFolderShareDraft(draft.revision_id, {
+        password: options.password,
+        password_mode: !options.passwordEnabled
+          ? "clear"
+          : options.password
+            ? "set"
+            : "keep",
+        expires_at: options.expiresAt
+      });
+      notice.hide();
+      try {
+        await navigator.clipboard.writeText(response.url);
+        new Notice("Folder share link copied");
+      } catch {
+        new Notice("Folder share updated, but the link could not be copied. Copy it from the result window.");
+      }
+      new ResultModal(this.app, options.title, response.url, response.updated_at, "folder").open();
+      this.refreshDashboardShare();
+    } catch (error) {
+      notice.hide();
+      new Notice(this.formatError(error, "Folder publish failed"));
+      this.debug("folder publish error", error);
+    }
+  }
+
+  vaultPathFromDrag(event: DragEvent): string | null {
+    const raw = event.dataTransfer?.getData("text/plain")?.trim() || "";
+    const path = resolveVaultDragPath(
+      this.activeVaultDragPath,
+      raw,
+      (path) => Boolean(this.app.vault.getAbstractFileByPath(path))
+    );
+    if (!path) return null;
+    const item = this.app.vault.getAbstractFileByPath(path);
+    if (item instanceof TFolder) return path;
+    return item instanceof TFile && item.extension === "md" ? path : null;
+  }
+
+  async publishVaultPath(path: string): Promise<void> {
+    const item = this.app.vault.getAbstractFileByPath(normalizePath(path));
+    if (item instanceof TFolder) {
+      await this.publishFolder(item);
+      return;
+    }
+    if (item instanceof TFile && item.extension === "md") {
+      await this.publishFile(item);
+      return;
+    }
+    new Notice("Choose a Markdown note or folder to share.");
+  }
+
+  private async buildFolderDocumentPayload(
+    folder: TFolder,
+    file: TFile,
+    navigationOrder: number,
+    useFullTheme: boolean
+  ): Promise<FolderShareDocumentPayload> {
+    const markdown = await this.app.vault.read(file);
+    const localAssets = await this.uploadLocalAssets(markdown, file);
+    const snapshot = await this.renderHtmlSnapshot(file, markdown, localAssets, useFullTheme);
+    if (useFullTheme && snapshot?.themeMode !== "full") {
+      throw new Error(`Theme styling for ${file.path} could not be prepared safely. The folder was not published.`);
+    }
+    let cssAsset: UploadedCssAsset | null = null;
+    if (snapshot?.css) cssAsset = await this.uploadCssSnapshot(snapshot.css);
+    const relativePath = folder.path
+      ? file.path.slice(folder.path.length).replace(/^\/+/, "")
+      : file.path;
+    const routeKey = (await sha256(relativePath.toLowerCase())).slice(0, 20);
+    return {
+      route_key: routeKey,
+      relative_path: relativePath,
+      source_hash: `sha256:${await sha256(markdown)}`,
+      title: file.basename,
+      markdown,
+      html_snapshot: snapshot?.html ?? null,
+      css_asset_id: cssAsset?.assetId ?? null,
+      assets: localAssets.linkedAssets.map((asset) => ({
+        asset_id: asset.assetId,
+        role: asset.role,
+        original_path: asset.originalPath
+      })),
+      navigation_order: navigationOrder
+    };
+  }
+
+  private markdownFilesInFolder(folder: TFolder): TFile[] {
+    const files: TFile[] = [];
+    const visit = (current: TFolder): void => {
+      for (const child of current.children) {
+        if (child.name.startsWith(".")) continue;
+        if (child instanceof TFolder) {
+          visit(child);
+        } else if (child instanceof TFile && child.extension === "md") {
+          files.push(child);
+        }
+      }
+    };
+    visit(folder);
+    return files.sort((left, right) => left.path.localeCompare(right.path));
+  }
+
   private async copyShareLink(file: TFile): Promise<void> {
-    const meta = readShareMeta(this.app, file);
+    const meta = this.currentShareMeta(file);
     if (!meta.url) {
       await this.publishFile(file);
       return;
@@ -680,7 +1353,7 @@ export default class DocferryPlugin extends Plugin {
   }
 
   private async stopSharing(file: TFile): Promise<void> {
-    const meta = readShareMeta(this.app, file);
+    const meta = this.currentShareMeta(file);
     if (!meta.id) {
       new Notice("This note has not been shared.");
       return;
@@ -691,24 +1364,29 @@ export default class DocferryPlugin extends Plugin {
     try {
       await this.api.deleteShare(meta.id);
       await clearShareMeta(this.app, file);
-      this.settingTab?.refreshForShareChange();
       this.refreshDashboardShare();
       notice.hide();
       new Notice("Share stopped. The link is no longer available.");
     } catch (error) {
       notice.hide();
+      if (isInvalidProductSessionError(error)) return;
       new Notice(this.formatError(error, "Stop sharing failed"));
     }
   }
 
   private async ensureCanPublishBeforeUpload(file: TFile, isUpdate: boolean): Promise<void> {
-    if (this.settings.authMode !== "company-sso" || !this.settings.sessionToken) return;
-    await this.loadMembership(true);
-    const membership = this.settings.membership;
+    if (!this.docferrySettings.sessionToken) return;
+    try {
+      await this.loadMembership(true);
+    } catch (error) {
+      if (!this.isBillingSessionRequired(error)) throw error;
+      await this.recoverBillingSession(true);
+    }
+    const membership = this.docferrySettings.membership;
     if (!membership) return;
     if (!isUpdate && !membership.canCreateShare) {
       throw new ShareApiError(
-        `Your current access allows ${membership.activeShareLimit} active shares. Stop a share or request more access from Account before publishing.`,
+        `Your current access allows ${membershipLimitLabel(membership.activeShareLimit)} active shares. Stop a share or request more access from Account before publishing.`,
         403,
         "membership_share_limit_exceeded",
         undefined,
@@ -722,7 +1400,7 @@ export default class DocferryPlugin extends Plugin {
     const markdownBytes = new TextEncoder().encode(markdown).byteLength;
     if (markdownBytes > membership.maxSingleFileSizeBytes) {
       throw new ShareApiError(
-        `This note is ${formatBytes(markdownBytes)}. Your current access allows ${formatBytes(membership.maxSingleFileSizeBytes)} per file. Request more access from Account before publishing larger files.`,
+        `This note is ${formatBytes(markdownBytes)}. Your current access allows ${formatBytes(membership.maxSingleFileSizeBytes)} per file. Open Plans to change membership or Support to send feedback.`,
         413,
         "membership_file_size_exceeded",
         undefined,
@@ -739,8 +1417,13 @@ export default class DocferryPlugin extends Plugin {
     return file instanceof TFile && file.extension === "md" ? file : null;
   }
 
-  private async showLinkStatus(file: TFile): Promise<void> {
+  private currentShareMeta(file: TFile): ReturnType<typeof readShareMeta> {
     const meta = readShareMeta(this.app, file);
+    return shareMetaBelongsToService(meta, this.docferrySettings.serverUrl) ? meta : {};
+  }
+
+  private async showLinkStatus(file: TFile): Promise<void> {
+    const meta = this.currentShareMeta(file);
     if (!meta.id) {
       new Notice("This note has not been shared.");
       return;
@@ -749,6 +1432,7 @@ export default class DocferryPlugin extends Plugin {
       const response = await this.api.getShareLinks(meta.id);
       new LinkStatusModal(this.app, file.basename, response).open();
     } catch (error) {
+      if (isInvalidProductSessionError(error)) return;
       new Notice(this.formatError(error, "Link status failed"));
     }
   }
@@ -757,7 +1441,8 @@ export default class DocferryPlugin extends Plugin {
     const options = await new ImportShareModal(
       this.app,
       textValue(initialUrl),
-      this.settings.defaultImportFolder || DEFAULT_SETTINGS.defaultImportFolder
+      this.docferrySettings.defaultImportFolder || DEFAULT_SETTINGS.defaultImportFolder,
+      this.docferrySettings.serverUrl
     ).openAndGetResult();
     if (!options) return;
 
@@ -776,22 +1461,260 @@ export default class DocferryPlugin extends Plugin {
     return this.importShareWithOptions({
       url,
       password,
-      outputFolder: this.settings.defaultImportFolder || DEFAULT_SETTINGS.defaultImportFolder,
+      outputFolder: this.docferrySettings.defaultImportFolder || DEFAULT_SETTINGS.defaultImportFolder,
       overwrite: false
     });
+  }
+
+  async importExternalLink(
+    value: string,
+    onProgress?: (progress: MediaNoteProgress) => void
+  ): Promise<DashboardImportResult | null> {
+    const linkNote = buildExternalLinkNote(value);
+    await this.refreshMembershipForExternalImport();
+    const membership = this.docferrySettings.membership;
+    const runtimeCanPrepareDetailedNote = Boolean(
+      membership &&
+      shouldPrepareDetailedNote(membership.hasMediaNoteEntitlement, linkNote.provider, {
+        enabled: membership.canUseMediaNote,
+        supportedProviders: membership.mediaNoteProviders
+      })
+    );
+    const hasDetailedNoteCapacity = Boolean(
+      membership && hasMediaNoteJobCapacity(membership.mediaNoteMonthlyJobsUsed, membership.mediaNoteMonthlyJobLimit)
+    );
+    const prepareDetailedNote = runtimeCanPrepareDetailedNote && hasDetailedNoteCapacity;
+    if (!prepareDetailedNote) {
+      if (membership?.hasMediaNoteEntitlement && requiresDetailedNoteProvider(linkNote.provider)) {
+        throw new Error(
+          hasDetailedNoteCapacity
+            ? `${externalLinkProviderLabel(linkNote.provider)} Advanced Import is temporarily unavailable. Nothing was saved.`
+            : `${externalLinkProviderLabel(linkNote.provider)} Advanced Import has reached this month's limit. Nothing was saved.`
+        );
+      }
+      return this.writeExternalImport(linkNote.title, linkNote.markdown);
+    }
+    if (!(await this.showUploadNoticeIfNeeded(true, "detailed_note"))) return null;
+
+    if (this.docferrySettings.pendingMediaNoteImport) {
+      throw new Error("A detailed note is already being prepared. Resume or cancel it before starting another.");
+    }
+    const ownerProductSubjectId = this.docferrySettings.connectedAccount?.productSubjectId;
+    if (!ownerProductSubjectId) {
+      throw new Error("Reconnect your Bondie account before starting a detailed note.");
+    }
+
+    onProgress?.("starting");
+    const created = await this.api.createMediaNoteJob(linkNote.url.href, mediaNoteIdempotencyKey());
+    await this.setPendingMediaNoteImport({
+      jobId: created.job_id,
+      ownerProductSubjectId,
+      sourceUrl: linkNote.url.href,
+      createdAt: new Date().toISOString()
+    });
+    onProgress?.("reading");
+    const completed = await this.waitForMediaNote(created, onProgress);
+    if (!MEDIA_NOTE_READY_STATUSES.has(completed.status) || !completed.markdown) {
+      await this.clearPendingMediaNoteImport(completed.job_id);
+      throw new Error(mediaNoteFailureMessage(completed));
+    }
+    return this.finishMediaNoteImport(completed, onProgress);
+  }
+
+  async cancelActiveMediaImport(): Promise<void> {
+    const pending = this.docferrySettings.pendingMediaNoteImport;
+    if (!pending) return;
+    this.requirePendingImportOwner(pending);
+    const job = await this.api.cancelMediaNoteJob(pending.jobId);
+    if (MEDIA_NOTE_TERMINAL_STATUSES.has(job.status)) {
+      await this.clearPendingMediaNoteImport(pending.jobId);
+      return;
+    }
+    throw new Error("The detailed note is still processing. Try cancelling again before changing accounts.");
+  }
+
+  private async refreshMembershipForExternalImport(): Promise<void> {
+    if (!this.docferrySettings.sessionToken) return;
+    const cachedMembership = this.docferrySettings.membership;
+    try {
+      await this.loadMembership(true);
+    } catch (error) {
+      if (isInvalidProductSessionError(error)) return;
+      if (cachedMembership && !cachedMembership.hasMediaNoteEntitlement) {
+        this.debug("membership refresh before link import failed; using cached free access", error);
+        return;
+      }
+      throw error;
+    }
+  }
+
+  private async writeExternalImport(
+    title: string,
+    markdown: string,
+    targetPath?: string
+  ): Promise<DashboardImportResult> {
+    const folder = this.docferrySettings.defaultImportFolder || DEFAULT_SETTINGS.defaultImportFolder;
+    const notePath = targetPath || await this.uniqueImportPath(folder, safeVaultSegment(title));
+    await this.ensureParentFolder(notePath);
+    const existing = this.app.vault.getAbstractFileByPath(notePath);
+    let file: TFile;
+    if (existing instanceof TFile) {
+      const existingMarkdown = await this.app.vault.read(existing);
+      if (existingMarkdown !== markdown) {
+        throw new Error("The saved note path changed while this import was recovering. Nothing was overwritten.");
+      }
+      file = existing;
+    } else {
+      file = await this.app.vault.create(notePath, markdown);
+    }
+    await this.app.workspace.getLeaf(true).openFile(file);
+    return { title, notePath, importedAssets: 0 };
+  }
+
+  private async waitForMediaNote(
+    initial: MediaNoteJobResponse,
+    onProgress?: (progress: MediaNoteProgress) => void
+  ): Promise<MediaNoteJobResponse> {
+    let job = initial;
+    for (let attempt = 0; attempt < MEDIA_NOTE_MAX_POLL_ATTEMPTS; attempt += 1) {
+      if (MEDIA_NOTE_TERMINAL_STATUSES.has(job.status)) return job;
+      if (this.docferrySettings.pendingMediaNoteImport?.jobId !== job.job_id) {
+        throw new Error("Import cancelled. Nothing was saved.");
+      }
+      if (attempt === 4) onProgress?.("writing");
+      await sleep(MEDIA_NOTE_POLL_INTERVAL_MS);
+      job = await this.api.getMediaNoteJob(job.job_id);
+    }
+    try {
+      const cancelled = await this.api.cancelMediaNoteJob(job.job_id);
+      if (cancelled.status === "cancelled") await this.clearPendingMediaNoteImport(job.job_id);
+    } catch (error) {
+      this.debug("media note timeout cancellation raced with completion", error);
+    }
+    throw new Error("This import took too long. Nothing was saved.");
+  }
+
+  private async finishMediaNoteImport(
+    completed: MediaNoteJobResponse,
+    onProgress?: (progress: MediaNoteProgress) => void
+  ): Promise<DashboardImportResult | null> {
+    if (!completed.markdown) {
+      await this.clearPendingMediaNoteImport(completed.job_id);
+      throw new Error(mediaNoteFailureMessage(completed));
+    }
+    onProgress?.("reviewing");
+    if (!(await confirmMediaNoteImport(this.app, completed))) {
+      await this.clearPendingMediaNoteImport(completed.job_id);
+      return null;
+    }
+    const pending = this.docferrySettings.pendingMediaNoteImport;
+    let targetPath = pending?.jobId === completed.job_id ? pending.targetPath : undefined;
+    if (!targetPath) {
+      const folder = this.docferrySettings.defaultImportFolder || DEFAULT_SETTINGS.defaultImportFolder;
+      targetPath = await this.uniqueImportPath(folder, safeVaultSegment(mediaNoteTitle(completed)));
+      await this.setPendingMediaNoteImport({
+        jobId: completed.job_id,
+        ownerProductSubjectId: pending?.ownerProductSubjectId || this.requireConnectedProductSubject(),
+        sourceUrl: completed.source_url || pending?.sourceUrl || "",
+        createdAt: pending?.createdAt || completed.created_at,
+        targetPath
+      });
+    }
+    const result = await this.writeExternalImport(
+      mediaNoteTitle(completed),
+      mediaNoteMarkdownForObsidian(completed.markdown),
+      targetPath
+    );
+    await this.clearPendingMediaNoteImport(completed.job_id);
+    return result;
+  }
+
+  private async setPendingMediaNoteImport(pending: PendingMediaNoteImport): Promise<void> {
+    this.docferrySettings.pendingMediaNoteImport = pending;
+    await this.saveSettings();
+  }
+
+  private async clearPendingMediaNoteImport(jobId: string): Promise<void> {
+    if (this.docferrySettings.pendingMediaNoteImport?.jobId !== jobId) return;
+    this.docferrySettings.pendingMediaNoteImport = null;
+    await this.saveSettings();
+  }
+
+  async resumeActiveMediaImport(): Promise<void> {
+    const pending = this.docferrySettings.pendingMediaNoteImport;
+    if (!pending || this.mediaNoteRecoveryInFlight) return;
+    try {
+      this.requirePendingImportOwner(pending);
+    } catch (error) {
+      new Notice(this.formatError(error, "Could not resume detailed note"), 8000);
+      return;
+    }
+    this.mediaNoteRecoveryInFlight = true;
+    const notice = new Notice("Resuming your detailed note in the background...", 0);
+    try {
+      const current = await this.api.getMediaNoteJob(pending.jobId);
+      const completed = await this.waitForMediaNote(current);
+      if (!MEDIA_NOTE_READY_STATUSES.has(completed.status) || !completed.markdown) {
+        await this.clearPendingMediaNoteImport(completed.job_id);
+        throw new Error(mediaNoteFailureMessage(completed));
+      }
+      const result = await this.finishMediaNoteImport(completed);
+      if (result) new Notice(`Saved ${result.title} to ${result.notePath}.`);
+    } catch (error) {
+      new Notice(this.formatError(error, "Could not resume detailed note"), 8000);
+    } finally {
+      notice.hide();
+      this.mediaNoteRecoveryInFlight = false;
+    }
+  }
+
+  private requireConnectedProductSubject(): string {
+    const productSubjectId = this.docferrySettings.connectedAccount?.productSubjectId;
+    if (!productSubjectId) throw new Error("Reconnect your Bondie account to continue this detailed note.");
+    return productSubjectId;
+  }
+
+  private requirePendingImportOwner(pending: PendingMediaNoteImport): void {
+    if (this.requireConnectedProductSubject() !== pending.ownerProductSubjectId) {
+      throw new Error(
+        "This detailed note belongs to another Bondie account. Sign in with the account that started it."
+      );
+    }
+  }
+
+  private async uniqueImportPath(folder: string, baseName: string): Promise<string> {
+    for (let index = 0; index < 1000; index += 1) {
+      const suffix = index ? ` ${index + 1}` : "";
+      const path = normalizePath(`${folder}/${baseName}${suffix}.md`);
+      if (!(await this.app.vault.adapter.exists(path))) return path;
+    }
+    throw new Error("Could not allocate a filename for this imported link.");
   }
 
   private async importShareWithOptions(options: ImportShareOptions): Promise<DashboardImportResult> {
     const session = await this.api.getShareImportPayload(options.url, options.password);
     const title = textValue(session.payload.title, "Untitled DocFerry share");
     const markdown = textValue(session.payload.markdown, "");
-    const notePath = await this.writeImportedMarkdown(title, markdown, options);
-    const importedAssets = await this.importShareAssets(
-      Array.isArray(session.payload.assets) ? session.payload.assets : [],
-      options.outputFolder,
-      options.overwrite,
-      notePath,
-      session.cookieHeader
+    const notePath = normalizePath(`${options.outputFolder}/${safeVaultSegment(title)}.md`);
+    const assets = (Array.isArray(session.payload.assets) ? session.payload.assets : []).map((asset) => {
+      let path = normalizePath(`${options.outputFolder}/${assetOutputRelativePath(asset)}`);
+      if (path === notePath) {
+        path = normalizePath(
+          `${options.outputFolder}/attachments/${safeVaultSegment(textValue(asset.filename) || textValue(asset.asset_id) || "attachment")}`
+        );
+      }
+      const url = textValue(asset.url);
+      if (!url) throw new Error(`Imported asset is missing a download URL: ${path}`);
+      return { path, url };
+    });
+    const importedAssets = await this.withShareImportCommitLock(() =>
+      commitAtomicImport(this.importFileSystem(), {
+        notePath,
+        markdown,
+        assets,
+        overwrite: options.overwrite,
+        download: (url) => this.api.downloadImportAsset(url, session.cookieHeader)
+      })
     );
     const file = this.app.vault.getAbstractFileByPath(notePath);
     if (file instanceof TFile) {
@@ -804,54 +1727,46 @@ export default class DocferryPlugin extends Plugin {
     };
   }
 
-  private async writeImportedMarkdown(
-    title: string,
-    markdown: string,
-    options: ImportShareOptions
-  ): Promise<string> {
-    const notePath = normalizePath(`${options.outputFolder}/${safeVaultSegment(title)}.md`);
-    await this.ensureParentFolder(notePath);
-    const existing = this.app.vault.getAbstractFileByPath(notePath);
-    if (existing instanceof TFile) {
-      if (!options.overwrite) throw new Error(`File already exists: ${notePath}`);
-      await this.app.vault.modify(existing, markdown);
-      return notePath;
-    }
-    if (await this.app.vault.adapter.exists(notePath)) {
-      if (!options.overwrite) throw new Error(`File already exists: ${notePath}`);
-      await this.app.vault.adapter.write(notePath, markdown);
-      return notePath;
-    }
-    await this.app.vault.create(notePath, markdown);
-    return notePath;
+  private importFileSystem(): ImportFileSystem {
+    const adapter = this.app.vault.adapter;
+    return {
+      exists: (path) => adapter.exists(path),
+      readText: (path) => adapter.read(path),
+      readBinary: (path) => adapter.readBinary(path),
+      writeText: async (path, body) => {
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (file instanceof TFile) {
+          await this.app.vault.process(file, () => body);
+        } else {
+          await adapter.write(path, body);
+        }
+      },
+      writeBinary: async (path, body) => {
+        await adapter.writeBinary(path, body);
+      },
+      remove: (path) => adapter.remove(path),
+      directoryExists: (path) => adapter.exists(path),
+      createDirectory: (path) => adapter.mkdir(path),
+      removeDirectoryIfEmpty: async (path) => {
+        const listing = await adapter.list(path);
+        if (listing.files.length || listing.folders.length) return;
+        await adapter.rmdir(path, false);
+      }
+    };
   }
 
-  private async importShareAssets(
-    assets: ShareImportAsset[],
-    outputFolder: string,
-    overwrite: boolean,
-    notePath: string,
-    cookieHeader?: string
-  ): Promise<number> {
-    let imported = 0;
-    for (const asset of assets) {
-      let assetPath = normalizePath(`${outputFolder}/${assetOutputRelativePath(asset)}`);
-      if (assetPath === notePath) {
-        assetPath = normalizePath(
-          `${outputFolder}/attachments/${safeVaultSegment(textValue(asset.filename) || textValue(asset.asset_id) || "attachment")}`
-        );
-      }
-      if ((await this.app.vault.adapter.exists(assetPath)) && !overwrite) {
-        throw new Error(`Asset already exists: ${assetPath}`);
-      }
-      const assetUrl = textValue(asset.url);
-      if (!assetUrl) throw new Error(`Imported asset is missing a download URL: ${assetPath}`);
-      const body = await this.api.downloadImportAsset(assetUrl, cookieHeader);
-      await this.ensureParentFolder(assetPath);
-      await this.app.vault.adapter.writeBinary(assetPath, body);
-      imported += 1;
+  private async withShareImportCommitLock<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.shareImportCommitQueue;
+    let release!: () => void;
+    this.shareImportCommitQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
     }
-    return imported;
   }
 
   private async ensureParentFolder(path: string): Promise<void> {
@@ -886,7 +1801,10 @@ export default class DocferryPlugin extends Plugin {
     report?.("Uploading local assets...");
     const localAssets = await this.uploadLocalAssets(markdown, file);
     report?.("Rendering Obsidian preview...");
-    const snapshot = await this.renderHtmlSnapshot(file, markdown, localAssets);
+    const useFullTheme = Boolean(
+      options.useThemeStyling && this.docferrySettings.membership?.canUseFullTheme
+    );
+    const snapshot = await this.renderHtmlSnapshot(file, markdown, localAssets, useFullTheme);
     let cssAsset: UploadedCssAsset | null = null;
     if (snapshot?.css) {
       report?.("Uploading reading style...");
@@ -931,6 +1849,7 @@ export default class DocferryPlugin extends Plugin {
       title,
       markdown,
       html_snapshot: snapshot?.html ?? null,
+      theme_mode: snapshot?.themeMode ?? "reader",
       css_asset_id: cssAsset?.assetId ?? null,
       assets: linkedAssets,
       outbound_links: outboundLinks,
@@ -946,20 +1865,23 @@ export default class DocferryPlugin extends Plugin {
     };
   }
 
-  private async showUploadNoticeIfNeeded(required: boolean): Promise<boolean> {
+  private async showUploadNoticeIfNeeded(
+    required: boolean,
+    action: "publish" | "detailed_note" = "publish"
+  ): Promise<boolean> {
     if (
-      this.settings.uploadConsentAcceptedAt &&
-      this.settings.uploadConsentNoticeId === UPLOAD_CONSENT_NOTICE_ID
+      this.docferrySettings.uploadConsentAcceptedAt &&
+      this.docferrySettings.uploadConsentNoticeId === UPLOAD_CONSENT_NOTICE_ID
     ) {
       return true;
     }
     if (this.uploadNoticeOpen) return !required;
     this.uploadNoticeOpen = true;
     try {
-      const accepted = await confirmDocferryUploadNotice(this.app, required ? "publish" : "startup");
+      const accepted = await confirmDocferryUploadNotice(this.app, required ? action : "startup");
       if (accepted) {
-        this.settings.uploadConsentAcceptedAt = new Date().toISOString();
-        this.settings.uploadConsentNoticeId = UPLOAD_CONSENT_NOTICE_ID;
+        this.docferrySettings.uploadConsentAcceptedAt = new Date().toISOString();
+        this.docferrySettings.uploadConsentNoticeId = UPLOAD_CONSENT_NOTICE_ID;
         await this.saveSettings();
         return true;
       }
@@ -972,7 +1894,8 @@ export default class DocferryPlugin extends Plugin {
   private async renderHtmlSnapshot(
     file: TFile,
     markdown: string,
-    localAssets: UploadedLocalAssets
+    localAssets: UploadedLocalAssets,
+    useFullTheme: boolean
   ): Promise<HtmlSnapshotResult | null> {
     const doc = currentDocument();
     const container = doc.createElement("div");
@@ -987,10 +1910,23 @@ export default class DocferryPlugin extends Plugin {
       this.applyLocalImageAssetPlaceholders(container, localAssets.imageAssets);
       this.applyLocalAttachmentPlaceholders(container, localAssets.linkedAssets);
       for (const element of Array.from(container.querySelectorAll("script"))) element.remove();
-      const css = this.captureThemeCss(container);
+      let themeMode: "reader" | "full" = "reader";
+      let css: string | null;
+      if (useFullTheme) {
+        try {
+          css = captureComputedThemeCss(container);
+          themeMode = "full";
+        } catch (error) {
+          this.debug("theme styling could not be captured; using reader theme", error);
+          css = null;
+        }
+      } else {
+        css = null;
+      }
       return {
         html: container.innerHTML,
-        css
+        css,
+        themeMode
       };
     } catch (error) {
       this.debug("html snapshot failed", error);
@@ -1056,11 +1992,11 @@ export default class DocferryPlugin extends Plugin {
 
   private async uploadLocalAsset(asset: PendingLocalAsset): Promise<UploadedLocalAsset> {
     const buffer = await this.app.vault.readBinary(asset.target);
-    const prepared = await this.prepareAssetUpload(asset.target, buffer, asset.contentType, asset.role);
+    const prepared = this.prepareAssetUpload(asset.target, buffer, asset.contentType);
     const contentHash = `sha256:${await sha256Bytes(prepared.data)}`;
     const response = await this.api.uploadAsset(prepared.data, prepared.filename, prepared.contentType, contentHash);
     this.debug("asset uploaded", {
-      path: asset.target.path,
+      assetType: asset.contentType,
       role: asset.role,
       originalBytes: buffer.byteLength,
       uploadedBytes: prepared.data.byteLength,
@@ -1073,29 +2009,12 @@ export default class DocferryPlugin extends Plugin {
     };
   }
 
-  private async prepareAssetUpload(
+  private prepareAssetUpload(
     target: TFile,
     buffer: ArrayBuffer,
-    contentType: string,
-    role: UploadedLocalAsset["role"]
-  ): Promise<PreparedAssetUpload> {
-    const qualityMode = IMAGE_OPTIMIZATION_ENABLED
-      ? this.settings.imageUploadQuality ?? DEFAULT_SETTINGS.imageUploadQuality
-      : "original";
-    if (role !== "image" || qualityMode === "original" || contentType === "image/gif") {
-      return { data: buffer, filename: target.name, contentType, qualityMode: "original" };
-    }
-
-    try {
-      const optimized = await optimizeImageAsset(buffer, contentType, qualityMode);
-      if (!optimized || optimized.byteLength >= buffer.byteLength) {
-        return { data: buffer, filename: target.name, contentType, qualityMode: "original" };
-      }
-      return { data: optimized, filename: target.name, contentType, qualityMode };
-    } catch (error) {
-      this.debug("image optimization failed; uploading original", { path: target.path, error });
-      return { data: buffer, filename: target.name, contentType, qualityMode: "original" };
-    }
+    contentType: string
+  ): PreparedAssetUpload {
+    return { data: buffer, filename: target.name, contentType, qualityMode: "original" };
   }
 
   private async uploadCssSnapshot(css: string): Promise<UploadedCssAsset | null> {
@@ -1108,34 +2027,6 @@ export default class DocferryPlugin extends Plugin {
       `sha256:${await sha256Bytes(bytes.buffer)}`
     );
     return { assetId: uploaded.asset_id };
-  }
-
-  private captureThemeCss(container: HTMLElement): string | null {
-    const chunks: string[] = [];
-    const push = (cssText: string): boolean => {
-      const sanitized = sanitizeCssRule(cssText);
-      if (!sanitized) return false;
-      const currentBytes = new TextEncoder().encode(chunks.join("\n")).byteLength;
-      const nextBytes = new TextEncoder().encode(sanitized).byteLength;
-      if (currentBytes + nextBytes > MAX_THEME_CSS_BYTES) return false;
-      chunks.push(sanitized);
-      return true;
-    };
-
-    const variables = collectThemeVariables();
-    if (variables) push(variables);
-
-    for (const sheet of Array.from(currentDocument().styleSheets)) {
-      let rules: CSSRuleList;
-      try {
-        rules = sheet.cssRules;
-      } catch {
-        continue;
-      }
-      collectMatchingRules(rules, container, push);
-    }
-
-    return chunks.length ? chunks.join("\n\n") : null;
   }
 
   private applyLocalImageAssetPlaceholders(
@@ -1292,8 +2183,9 @@ export default class DocferryPlugin extends Plugin {
   }
 
   private debug(message: string, value: unknown): void {
-    if (!this.settings.debug) return;
-    console.debug(`[docferry] ${message}`, value);
+    if (!this.docferrySettings.debug) return;
+    void value;
+    console.debug(`[docferry] ${message}`);
   }
 }
 
@@ -1338,12 +2230,6 @@ function assetOutputRelativePath(asset: ShareImportAsset): string {
   return `attachments/${safeVaultSegment(textValue(asset.filename) || textValue(asset.asset_id) || "attachment")}`;
 }
 
-function safeVaultSegment(value: unknown): string {
-  const name = textValue(value).replace(/[\\/:*?"<>|]+/g, "-").trim().replace(/^\.+|\.+$/g, "");
-  const clipped = name.slice(0, 120).trim();
-  return clipped || `docferry-import-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`;
-}
-
 function textValue(value: unknown, fallback = ""): string {
   if (typeof value === "string") return value;
   if (value === null || value === undefined) return fallback;
@@ -1366,82 +2252,77 @@ function parseObsidianTarget(rawTarget: string): { path: string; subpath: string
   };
 }
 
-function collectThemeVariables(): string | null {
-  const doc = currentDocument();
-  const rootVars = customPropertiesFor(doc.documentElement);
-  const bodyVars = customPropertiesFor(doc.body);
-  const rootBlock = rootVars.length ? `:root {\n${rootVars.join("\n")}\n}` : "";
-  const bodyBlock = bodyVars.length ? `.reader-page {\n${bodyVars.join("\n")}\n}` : "";
-  return [rootBlock, bodyBlock].filter(Boolean).join("\n\n") || null;
-}
+function captureComputedThemeCss(container: HTMLElement): string | null {
+  const doc = container.ownerDocument;
+  const styleFor = (selector: string): CSSStyleDeclaration | null => {
+    const element = container.querySelector(selector);
+    if (!element) return null;
+    return element.ownerDocument.defaultView?.getComputedStyle(element) ?? getComputedStyle(element);
+  };
+  const containerStyle = doc.defaultView?.getComputedStyle(container) ?? getComputedStyle(container);
+  const linkStyle = styleFor("a");
+  const borderStyle = styleFor(".callout, blockquote, table");
+  const codeStyle = styleFor("pre, code");
+  const codeTextStyle = styleFor("pre code, code");
+  const radiusStyle = styleFor(".callout, pre, table");
+  const declarations = new Map<string, string>();
+  const add = (name: string, ...values: Array<string | null | undefined>): void => {
+    const value = values.map(safeThemeToken).find((candidate): candidate is string => Boolean(candidate));
+    if (value) declarations.set(name, value);
+  };
 
-function customPropertiesFor(element: Element): string[] {
-  const style = element.ownerDocument.defaultView?.getComputedStyle(element) ?? getComputedStyle(element);
-  const properties: string[] = [];
-  for (let index = 0; index < style.length; index += 1) {
-    const name = style.item(index);
-    if (!name.startsWith("--")) continue;
-    const value = style.getPropertyValue(name).trim();
-    if (!value || /url\(/i.test(value)) continue;
-    properties.push(`  ${name}: ${value};`);
-  }
-  return properties.sort();
+  add(
+    "--docferry-theme-accent",
+    readThemeCustomProperty(doc, "--interactive-accent", "--text-accent", "--color-accent", "--link-color"),
+    linkStyle?.color
+  );
+  add(
+    "--docferry-theme-border",
+    readThemeCustomProperty(doc, "--background-modifier-border", "--divider-color", "--table-border-color"),
+    borderStyle?.borderLeftColor,
+    borderStyle?.borderTopColor
+  );
+  add("--docferry-theme-radius", radiusStyle?.borderRadius);
+  add("--docferry-theme-font", containerStyle.fontFamily);
+  add(
+    "--docferry-theme-code-font",
+    readThemeCustomProperty(doc, "--font-monospace", "--code-font-family"),
+    codeTextStyle?.fontFamily
+  );
+  add("--docferry-theme-code-bg", codeStyle?.backgroundColor);
+  add("--docferry-theme-code-ink", codeTextStyle?.color);
+
+  if (!declarations.size) return null;
+  const body = Array.from(declarations, ([name, value]) => `  ${name}: ${value};`).join("\n");
+  return `/* DocFerry semantic theme tokens: visual identity without layout capture. */\n.reader-page.theme-fidelity-full {\n${body}\n}`;
 }
 
 function currentDocument(): Document {
   return activeDocument;
 }
 
-function collectMatchingRules(
-  rules: CSSRuleList,
-  container: HTMLElement,
-  push: (cssText: string) => boolean
-): void {
-  for (const rule of Array.from(rules)) {
-    if (rule instanceof CSSStyleRule) {
-      if (selectorMatchesContainer(rule.selectorText, container)) push(rule.cssText);
-      continue;
-    }
-    if (rule instanceof CSSMediaRule) {
-      const nested: string[] = [];
-      collectMatchingRules(rule.cssRules, container, (cssText) => {
-        nested.push(cssText);
-        return true;
-      });
-      if (nested.length) push(`@media ${rule.conditionText} {\n${nested.join("\n")}\n}`);
+function readThemeCustomProperty(doc: Document, ...names: string[]): string | null {
+  const view = doc.defaultView;
+  const styles = [
+    view?.getComputedStyle(doc.body),
+    view?.getComputedStyle(doc.documentElement)
+  ].filter((style): style is CSSStyleDeclaration => Boolean(style));
+  for (const name of names) {
+    for (const style of styles) {
+      const value = safeThemeToken(style.getPropertyValue(name));
+      if (value) return value;
     }
   }
+  return null;
 }
 
-function selectorMatchesContainer(selectorText: string, container: HTMLElement): boolean {
-  return selectorText
-    .split(",")
-    .map((selector) => sanitizeSelectorForMatch(selector))
-    .filter((selector): selector is string => Boolean(selector))
-    .some((selector) => {
-      try {
-        return container.matches(selector) || Boolean(container.querySelector(selector));
-      } catch {
-        return false;
-      }
-    });
-}
-
-function sanitizeSelectorForMatch(selector: string): string | null {
-  const sanitized = selector
-    .replace(/::[a-zA-Z-]+(\([^)]*\))?/g, "")
-    .replace(/:(hover|active|focus|focus-visible|focus-within|visited|link|target)/g, "")
-    .trim();
-  return sanitized || null;
-}
-
-function sanitizeCssRule(cssText: string): string | null {
-  if (!cssText.trim() || /url\(/i.test(cssText)) return null;
-  return cssText;
-}
-
-function isRemoteUrl(value: string): boolean {
-  return /^https?:\/\//i.test(value) || value.startsWith("data:");
+function safeThemeToken(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  if (!normalized || /^(?:none|normal|transparent)$/i.test(normalized)) return null;
+  if (/rgba?\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)/i.test(normalized)) return null;
+  if (/^rgba?\([^)]*\/\s*0(?:\.0+)?\s*\)$/i.test(normalized)) return null;
+  if (/url\s*\(|[;{}]/i.test(normalized)) return null;
+  return normalized;
 }
 
 function contentTypeForExtension(extension: string): string | null {
@@ -1502,52 +2383,6 @@ function contentTypeForExtension(extension: string): string | null {
     default:
       return null;
   }
-}
-
-async function optimizeImageAsset(
-  buffer: ArrayBuffer,
-  contentType: string,
-  qualityMode: ImageUploadQuality
-): Promise<ArrayBuffer | null> {
-  const preset = IMAGE_QUALITY_PRESETS[qualityMode];
-  if (!preset.maxDimension || !preset.quality) return null;
-  if (!["image/jpeg", "image/png", "image/webp"].includes(contentType)) return null;
-  if (typeof createImageBitmap !== "function") return null;
-
-  const bitmap = await createImageBitmap(new Blob([buffer], { type: contentType }));
-  try {
-    const scale = Math.min(1, preset.maxDimension / Math.max(bitmap.width, bitmap.height));
-    const width = Math.max(1, Math.round(bitmap.width * scale));
-    const height = Math.max(1, Math.round(bitmap.height * scale));
-    const canvas = currentDocument().createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext("2d");
-    if (!context) return null;
-    context.imageSmoothingEnabled = true;
-    context.imageSmoothingQuality = qualityMode === "high" ? "high" : "medium";
-    context.drawImage(bitmap, 0, 0, width, height);
-    const blob = await canvasToBlob(canvas, contentType, contentType === "image/png" ? undefined : preset.quality);
-    return await blob.arrayBuffer();
-  } finally {
-    bitmap.close();
-  }
-}
-
-function canvasToBlob(canvas: HTMLCanvasElement, contentType: string, quality?: number): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) {
-          reject(new Error("Canvas image export failed."));
-          return;
-        }
-        resolve(blob);
-      },
-      contentType,
-      quality
-    );
-  });
 }
 
 async function mapWithConcurrency<T, R>(

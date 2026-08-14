@@ -1,12 +1,17 @@
 import { App, Modal, Notice, Setting } from "obsidian";
 import { renderDocferryHeader } from "./brand";
+import { resolveExpirySelection } from "./publish-state";
 import type { PublishOptions } from "./types";
 
 export interface ShareModalDefaults {
   title: string;
   passwordEnabled: boolean;
+  passwordAlreadySet: boolean;
   expiresInDays: string;
+  existingExpiresAt?: string | null;
   isUpdate: boolean;
+  canUseThemeStyling: boolean;
+  useThemeStyling: boolean;
 }
 
 export class ShareModal extends Modal {
@@ -16,12 +21,14 @@ export class ShareModal extends Modal {
   private passwordEnabled: boolean;
   private password = "";
   private expiresInDays: string;
+  private useThemeStyling: boolean;
 
   constructor(app: App, private readonly defaults: ShareModalDefaults) {
     super(app);
     this.title = defaults.title;
     this.passwordEnabled = defaults.passwordEnabled;
     this.expiresInDays = defaults.expiresInDays;
+    this.useThemeStyling = defaults.canUseThemeStyling && defaults.useThemeStyling;
   }
 
   openAndGetResult(): Promise<PublishOptions | null> {
@@ -34,10 +41,13 @@ export class ShareModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
+    contentEl.addClass("docferry-share-modal");
     renderDocferryHeader(
       contentEl,
-      this.defaults.isUpdate ? "Update share link" : "Share thru Docferry",
-      "Publish exactly one Obsidian note as a secure DocFerry URL."
+      this.defaults.isUpdate ? "Update this share" : "Share this note",
+      this.defaults.isUpdate
+        ? "Refresh the existing link with the latest version of this note."
+        : "Create a share link. Add a password or expiry only when you need one."
     );
 
     new Setting(contentEl).setName("Title").addText((text) => {
@@ -72,9 +82,11 @@ export class ShareModal extends Modal {
     renderPassword();
 
     new Setting(contentEl)
-      .setName("Expires")
+      .setName("Link expires")
       .addDropdown((dropdown) =>
-        dropdown
+        (this.expiresInDays === "keep"
+          ? dropdown.addOption("keep", "Keep current expiration")
+          : dropdown)
           .addOption("never", "Never")
           .addOption("30", "30 days")
           .setValue(this.expiresInDays)
@@ -82,6 +94,17 @@ export class ShareModal extends Modal {
             this.expiresInDays = value;
           })
       );
+
+    if (this.defaults.canUseThemeStyling) {
+      new Setting(contentEl)
+        .setName("Use my Obsidian theme")
+        .setDesc("Bring over colors, borders, callouts, and code styling while keeping DocFerry's clean reading layout.")
+        .addToggle((toggle) =>
+          toggle.setValue(this.useThemeStyling).onChange((value) => {
+            this.useThemeStyling = value;
+          })
+        );
+    }
 
     const buttons = contentEl.createDiv({ cls: "modal-button-container" });
     buttons.createEl("button", { text: "Cancel" }).addEventListener("click", () => {
@@ -97,7 +120,7 @@ export class ShareModal extends Modal {
         new Notice("Title is required.");
         return;
       }
-      if (this.passwordEnabled && !this.password.trim()) {
+      if (this.passwordEnabled && !this.password.trim() && !this.defaults.passwordAlreadySet) {
         new Notice("Password is required when password protection is enabled.");
         return;
       }
@@ -105,7 +128,8 @@ export class ShareModal extends Modal {
         title,
         passwordEnabled: this.passwordEnabled,
         password: this.passwordEnabled ? this.password : undefined,
-        expiresAt: this.resolveExpiresAt()
+        expiresAt: this.resolveExpiresAt(),
+        useThemeStyling: this.defaults.canUseThemeStyling && this.useThemeStyling
       });
     });
   }
@@ -122,11 +146,6 @@ export class ShareModal extends Modal {
   }
 
   private resolveExpiresAt(): string | null {
-    if (this.expiresInDays === "never") return null;
-    const days = Number(this.expiresInDays);
-    if (!Number.isFinite(days) || days <= 0) return null;
-    const expires = new Date();
-    expires.setDate(expires.getDate() + days);
-    return expires.toISOString();
+    return resolveExpirySelection(this.expiresInDays, this.defaults.existingExpiresAt);
   }
 }

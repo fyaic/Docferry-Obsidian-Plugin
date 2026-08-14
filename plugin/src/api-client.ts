@@ -8,8 +8,18 @@ import type {
   AuthExchangeResponse,
   AuthWhoamiResponse,
   DashboardLinkResponse,
+  DeviceAuthorizationCodeResponse,
   DeleteShareResponse,
+  DeleteShareRecordResponse,
+  FolderShareDocumentPayload,
+  FolderShareDocumentResponse,
+  FolderShareDraftPayload,
+  FolderShareDraftResponse,
+  FolderShareListResponse,
+  FolderShareResponse,
   MembershipResponse,
+  MediaNoteJobResponse,
+  PendingAuthExchangeResponse,
   SharePayload,
   ShareImportPayloadResponse,
   ShareListResponse,
@@ -18,6 +28,8 @@ import type {
   ShareStatusResponse
 } from "./types";
 import type { DocferrySettings } from "./settings";
+import { isInvalidProductSessionError } from "./session-errors";
+import { isSameDocferryOrigin, parseDocferryShareUrl } from "./share-url";
 
 interface ErrorEnvelope {
   error?: {
@@ -48,7 +60,8 @@ export class ShareApiError extends Error {
 export class ShareApiClient {
   constructor(
     private readonly getSettings: () => DocferrySettings,
-    private readonly pluginVersion: string
+    private readonly pluginVersion: string,
+    private readonly onInvalidSession?: (error: ShareApiError) => void
   ) {}
 
   async health(): Promise<{ ok: boolean; service: string; version: string }> {
@@ -79,15 +92,42 @@ export class ShareApiClient {
     return this.deleteJson(`/v0/shares/${encodeURIComponent(shareId)}`);
   }
 
-  async validateAuthToken(): Promise<void> {
-    try {
-      await this.getJson("/v0/shares/sh_token_probe");
-    } catch (error) {
-      if (error instanceof ShareApiError && error.status === 404 && error.code === "share_not_found") {
-        return;
-      }
-      throw error;
-    }
+  async deleteShareRecord(shareId: string): Promise<DeleteShareRecordResponse> {
+    return this.deleteJson(`/v0/shares/${encodeURIComponent(shareId)}/record`);
+  }
+
+  async createFolderShareDraft(payload: FolderShareDraftPayload): Promise<FolderShareDraftResponse> {
+    return this.postJson("/v0/folder-shares/drafts", payload);
+  }
+
+  async putFolderShareDocument(
+    revisionId: string,
+    routeKey: string,
+    payload: FolderShareDocumentPayload
+  ): Promise<FolderShareDocumentResponse> {
+    return this.putJson(
+      `/v0/folder-shares/drafts/${encodeURIComponent(revisionId)}/documents/${encodeURIComponent(routeKey)}`,
+      payload
+    );
+  }
+
+  async commitFolderShareDraft(
+    revisionId: string,
+    payload: { password?: string; password_mode: "keep" | "set" | "clear"; expires_at?: string | null }
+  ): Promise<FolderShareResponse> {
+    return this.postJson(`/v0/folder-shares/drafts/${encodeURIComponent(revisionId)}/commit`, payload);
+  }
+
+  async listFolderShares(): Promise<FolderShareListResponse> {
+    return this.getJson("/v0/folder-shares");
+  }
+
+  async deleteFolderShare(folderShareId: string): Promise<DeleteShareResponse> {
+    return this.deleteJson(`/v0/folder-shares/${encodeURIComponent(folderShareId)}`);
+  }
+
+  async deleteFolderShareRecord(folderShareId: string): Promise<DeleteShareRecordResponse> {
+    return this.deleteJson(`/v0/folder-shares/${encodeURIComponent(folderShareId)}/record`);
   }
 
   async uploadAsset(
@@ -109,8 +149,8 @@ export class ShareApiClient {
           storage_key: intent.storage_key
         });
       }
-    } catch (error) {
-      console.warn("DocFerry direct asset upload failed, falling back to API proxy.", error);
+    } catch {
+      console.warn("DocFerry direct asset upload failed; retrying through the API proxy.");
     }
     return this.uploadAssetViaApi(data, filename, contentType, contentHash);
   }
@@ -197,12 +237,22 @@ export class ShareApiClient {
     return this.getJson("/v0/auth/config");
   }
 
-  async exchangeAuthCode(code: string, redirectUri: string, state?: string): Promise<AuthExchangeResponse> {
-    return this.postJson("/v0/auth/exchange", {
-      code,
-      state,
-      redirect_uri: redirectUri
-    });
+  async exchangePendingAuth(state: string): Promise<AuthExchangeResponse | PendingAuthExchangeResponse> {
+    return this.postJson("/v0/auth/exchange/pending", { state });
+  }
+
+  async createDeviceAuthorization(payload: {
+    client_instance_id: string;
+    plugin_version: string;
+    platform: string;
+    instance_type: "obsidian_plugin";
+    intent: "login" | "signup" | "switch_account";
+  }): Promise<DeviceAuthorizationCodeResponse> {
+    return this.postJson("/v0/auth/device/code", payload);
+  }
+
+  async exchangeDeviceAuthorization(deviceCode: string): Promise<AuthExchangeResponse> {
+    return this.postJson("/v0/auth/device/token", { device_code: deviceCode });
   }
 
   async whoami(): Promise<AuthWhoamiResponse> {
@@ -229,12 +279,32 @@ export class ShareApiClient {
     return this.postJson("/v0/access-requests", payload);
   }
 
+  async createMediaNoteJob(sourceUrl: string, idempotencyKey: string): Promise<MediaNoteJobResponse> {
+    return this.postJson(
+      "/v0/media-note/jobs",
+      { source_url: sourceUrl, output_language: "source" },
+      { "Idempotency-Key": idempotencyKey }
+    );
+  }
+
+  async getMediaNoteJob(jobId: string): Promise<MediaNoteJobResponse> {
+    return this.getJson(`/v0/media-note/jobs/${encodeURIComponent(jobId)}`);
+  }
+
+  async cancelMediaNoteJob(jobId: string): Promise<MediaNoteJobResponse> {
+    return this.postJson(`/v0/media-note/jobs/${encodeURIComponent(jobId)}/cancel`, {});
+  }
+
   async logout(): Promise<{ ok: boolean }> {
     return this.postJson("/v0/auth/logout", {});
   }
 
   async getShareImportPayload(shareUrl: string, password?: string): Promise<ShareImportSession> {
-    const { baseUrl, slug } = parseShareUrl(shareUrl);
+    const target = parseDocferryShareUrl(shareUrl, this.getSettings().serverUrl);
+    if (!target) {
+      throw new ShareApiError("Use a share link from this DocFerry service.", 0, "invalid_share_url");
+    }
+    const { baseUrl, slug } = target;
     const importUrl = `${baseUrl}/s/${encodeURIComponent(slug)}/import`;
     let res = await requestUrl({
       url: importUrl,
@@ -270,6 +340,9 @@ export class ShareApiClient {
   }
 
   async downloadImportAsset(url: string, cookieHeader?: string): Promise<ArrayBuffer> {
+    if (!isSameDocferryOrigin(url, this.getSettings().serverUrl)) {
+      throw new ShareApiError("The share included an invalid asset URL.", 0, "invalid_import_asset_url");
+    }
     const res = await requestUrl({
       url,
       method: "GET",
@@ -291,11 +364,11 @@ export class ShareApiClient {
     return this.parse<T>(res.status, res.text);
   }
 
-  private async postJson<T>(path: string, body: unknown): Promise<T> {
+  private async postJson<T>(path: string, body: unknown, extraHeaders: Record<string, string> = {}): Promise<T> {
     const res = await requestUrl({
       url: this.url(path),
       method: "POST",
-      headers: this.headers(true),
+      headers: { ...this.headers(true), ...extraHeaders },
       body: JSON.stringify(body),
       throw: false
     });
@@ -334,7 +407,7 @@ export class ShareApiClient {
       "X-Share-Plugin-Version": this.pluginVersion
     };
     if (json) headers["Content-Type"] = "application/json";
-    const token = settings.authMode === "company-sso" ? settings.sessionToken : settings.manualApiToken || settings.apiToken;
+    const token = settings.sessionToken;
     if (token) headers.Authorization = `Bearer ${token}`;
     return headers;
   }
@@ -353,36 +426,20 @@ export class ShareApiClient {
 
     const envelope = parsed as ErrorEnvelope | undefined;
     const message = envelope?.error?.message || text || `Request failed with ${status}`;
-    throw new ShareApiError(
+    const error = new ShareApiError(
       message,
       status,
       envelope?.error?.code,
       envelope?.error?.request_id,
       envelope?.error?.details
     );
+    if (isInvalidProductSessionError(error)) this.onInvalidSession?.(error);
+    throw error;
   }
 }
 
 function safeHeaderValue(value: string): string {
   return encodeURIComponent(value).slice(0, 255);
-}
-
-function parseShareUrl(value: unknown): { baseUrl: string; slug: string } {
-  const raw = typeof value === "string" ? value : "";
-  let parsed: URL;
-  try {
-    parsed = new URL(raw.trim());
-  } catch {
-    throw new ShareApiError("Share URL must include scheme and host.", 0, "invalid_share_url");
-  }
-  const parts = parsed.pathname.split("/").filter(Boolean);
-  if (!parsed.protocol.startsWith("http") || !parsed.host || parts.length < 2 || parts[0] !== "s") {
-    throw new ShareApiError("Share URL must look like https://host/s/{slug}.", 0, "invalid_share_url");
-  }
-  return {
-    baseUrl: `${parsed.protocol}//${parsed.host}`,
-    slug: parts[1]
-  };
 }
 
 function cookieHeaderFrom(headers: Record<string, string>): string | undefined {

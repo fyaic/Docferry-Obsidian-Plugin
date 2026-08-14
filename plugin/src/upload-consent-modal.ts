@@ -1,7 +1,7 @@
-import { App, Modal } from "obsidian";
+import { App, Modal, setIcon } from "obsidian";
 import { appendDocferryLogo } from "./brand";
 
-export type UploadConsentContext = "startup" | "publish";
+export type UploadConsentContext = "startup" | "publish" | "detailed_note";
 
 export function confirmDocferryUploadNotice(app: App, context: UploadConsentContext = "publish"): Promise<boolean> {
   return new Promise((resolve) => {
@@ -28,26 +28,56 @@ class DocferryUploadConsentModal extends Modal {
     const header = contentEl.createDiv({ cls: "docferry-consent-header" });
     appendDocferryLogo(header, "docferry-consent-logo").setAttr("aria-hidden", "true");
     const copy = header.createDiv({ cls: "docferry-consent-copy" });
-    copy.createDiv({ text: this.context === "startup" ? "Before using DocFerry" : "Share thru Docferry", cls: "docferry-heading docferry-heading-2" });
+    const title = this.context === "startup"
+      ? "Privacy and security"
+      : this.context === "detailed_note"
+        ? "Before DocFerry prepares this link"
+        : "Before you publish";
+    copy.createEl("h2", {
+      text: title,
+      cls: "docferry-heading docferry-heading-2"
+    });
     copy.createEl("p", {
-      text:
-        "DocFerry does not upload your vault automatically. When you publish, the selected note and explicitly referenced local assets are sent to DocFerry servers so the share link can open on the web."
+      text: "Your vault stays on this device. DocFerry uploads content only when you choose to share or save a public link."
     });
 
-    const details = contentEl.createDiv({ cls: "docferry-consent-details" });
-    details.createEl("p", {
-      text: "Only publish notes you intend to share. Linked notes are not uploaded unless you publish them separately."
+    const summary = contentEl.createDiv({ cls: "docferry-consent-summary" });
+    appendConsentItem(summary, "file-check-2", "You choose what leaves Obsidian", "Only the note, folder, files, or public link you select. Some supported links may use external AI to prepare a note.");
+    appendConsentItem(summary, "shield-check", "Protected during transfer and storage", "Connections use HTTPS and stored content is encrypted on DocFerry servers.");
+    appendConsentItem(summary, "sliders-horizontal", "You stay in control", "Add a password or expiry, and stop a share whenever you need to.");
+
+    contentEl.createEl("p", {
+      cls: "docferry-consent-boundary",
+      text: "DocFerry must decrypt content to display a share or create an import. This is not end-to-end or zero-knowledge encryption."
     });
-    details.createEl("p", {
-      text: "You can protect a share with a password, set an expiration, or stop sharing later. Readers with access may already have viewed the content before a share is stopped."
+
+    const details = contentEl.createEl("details", { cls: "docferry-consent-details" });
+    details.createEl("summary", { text: "Privacy details" });
+    const detailsBody = details.createDiv({ cls: "docferry-consent-details-body" });
+    detailsBody.createEl("h3", { text: "What DocFerry receives", cls: "docferry-heading docferry-heading-4" });
+    detailsBody.createEl("p", {
+      text:
+        "Sharing uploads the selected note or folder, its web snapshot, and referenced local files. Saving a supported public link sends its URL to DocFerry. For supported media, DocFerry may send a public YouTube URL or bounded audio or video content, including a reviewed public Bilibili stream, through OpenRouter to a server-selected AI model to create the note. OpenRouter and the selected model provider process that input. DocFerry does not send your Bondie identity, browser cookies, history, profile, or other vault files."
     });
-    details.createEl("p", {
-      text: "Account tokens stay in Obsidian plugin storage on this device. DocFerry writes share metadata to the note frontmatter and writes imported shares only to the folder you choose."
+    detailsBody.createEl("h3", { text: "Passwords, sessions, and retention", cls: "docferry-heading docferry-heading-4" });
+    detailsBody.createEl("p", {
+      text:
+        "Share passwords are stored as one-way hashes. Your account token stays in this plugin on this device. Temporary import content is cleared after its retention period. Anyone with the link, and its password when enabled, can view the shared content."
     });
+    const privacy = detailsBody.createEl("a", {
+      text: "Read the DocFerry Privacy Policy",
+      href: "https://docferry.bondie.io/privacy"
+    });
+    privacy.setAttr("target", "_blank");
+    privacy.setAttr("rel", "noopener noreferrer");
 
     const buttons = contentEl.createDiv({ cls: "modal-button-container docferry-consent-actions" });
     const cancel = buttons.createEl("button", { text: this.context === "startup" ? "Not now" : "Cancel", attr: { type: "button" } });
-    const accept = buttons.createEl("button", { text: "I understand", cls: "mod-cta", attr: { type: "button" } });
+    const accept = buttons.createEl("button", {
+      text: this.context === "startup" ? "Continue" : this.context === "detailed_note" ? "Continue" : "Publish",
+      cls: "mod-cta",
+      attr: { type: "button" }
+    });
 
     cancel.addEventListener("click", () => this.closeWith(false));
     accept.addEventListener("click", () => this.closeWith(true));
@@ -66,4 +96,13 @@ class DocferryUploadConsentModal extends Modal {
     this.resolve(accepted);
     this.close();
   }
+}
+
+function appendConsentItem(containerEl: HTMLElement, iconName: string, title: string, description: string): void {
+  const item = containerEl.createDiv({ cls: "docferry-consent-summary-item" });
+  const icon = item.createSpan({ cls: "docferry-consent-summary-icon", attr: { "aria-hidden": "true" } });
+  setIcon(icon, iconName);
+  const copy = item.createDiv();
+  copy.createEl("h3", { text: title, cls: "docferry-heading docferry-heading-4" });
+  copy.createEl("p", { text: description });
 }

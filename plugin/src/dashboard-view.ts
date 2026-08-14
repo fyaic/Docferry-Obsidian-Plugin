@@ -1,24 +1,30 @@
-import { App, ItemView, Notice, WorkspaceLeaf, setIcon } from "obsidian";
+import { App, ItemView, Menu, Notice, TFile, TFolder, WorkspaceLeaf, setIcon } from "obsidian";
 import { ShareApiError } from "./api-client";
 import { appendDocferryLogo, DOCFERRY_PRODUCT_NAME } from "./brand";
+import { externalLinkProvider, validatedExternalImportUrl } from "./external-import";
+import { openExternalUrl } from "./external-links";
 import { ImportPasswordModal } from "./import-password-modal";
+import { mediaNoteProgressMessage, type MediaNoteProgress } from "./media-note";
+import { shouldPrepareDetailedNote } from "./media-note-availability";
+import { hasActiveShareLink, shareListSummary } from "./share-actions";
 import type { DocferrySettings } from "./settings";
+import { parseDocferryShareUrl } from "./share-url";
 import {
   expiryLabel,
   formatBytes,
   formatDateTime,
-  membershipAccessLabel,
   membershipUnavailableMessage,
+  membershipUsageLabel,
   renderAccountAvatar,
   statusClass,
   statusLabel,
   vaultLabel
 } from "./settings";
-import type { ShareListItemResponse } from "./types";
+import type { FolderShareResponse, ShareListItemResponse } from "./types";
 
 export const DOCFERRY_DASHBOARD_VIEW_TYPE = "docferry-dashboard";
 
-type WorkspacePage = "import" | "shares" | "account";
+type WorkspacePage = "home" | "shares" | "account";
 
 export interface DashboardImportResult {
   title: string;
@@ -28,34 +34,52 @@ export interface DashboardImportResult {
 
 export interface DashboardHost {
   app: App;
-  manifest: { version: string };
-  settings: DocferrySettings;
+  docferrySettings: DocferrySettings;
   startLogin(): Promise<void>;
-  testConnection(): Promise<void>;
+  startSignup(): Promise<void>;
+  reconnectAccount(): Promise<void>;
   refreshMembership(force?: boolean): Promise<void>;
-  refreshMembershipForDashboardOpen(): void;
-  openDashboardHome(): Promise<void>;
   openMembershipCenter(): Promise<void>;
+  openDashboardHome(): Promise<void>;
   requestAccessUpgrade(source: "plugin_settings" | "plugin_dashboard"): Promise<void>;
   listShares(): Promise<ShareListItemResponse[]>;
+  listFolderShares(): Promise<FolderShareResponse[]>;
   importShareFromDashboard(url: string, password?: string): Promise<DashboardImportResult>;
+  importExternalLink(
+    url: string,
+    onProgress?: (progress: MediaNoteProgress) => void
+  ): Promise<DashboardImportResult | null>;
+  cancelActiveMediaImport(): Promise<void>;
+  resumeActiveMediaImport(): Promise<void>;
   openSettingsTab(): void;
   openShareLinks(share: ShareListItemResponse): Promise<void>;
   updateShareFromList(share: ShareListItemResponse): Promise<void>;
+  updateFolderShareFromList(folderShare: FolderShareResponse): Promise<void>;
   stopShareFromList(share: ShareListItemResponse): Promise<void>;
+  stopFolderShareFromList(folderShare: FolderShareResponse): Promise<void>;
+  deleteShareHistory(share: ShareListItemResponse): Promise<void>;
+  deleteFolderShareHistory(folderShare: FolderShareResponse): Promise<void>;
+  vaultPathFromDrag(event: DragEvent): string | null;
+  publishVaultPath(path: string): Promise<void>;
+  disconnectAccount(): Promise<void>;
 }
 
 export class DocferryDashboardView extends ItemView {
-  private activePage: WorkspacePage = "import";
+  private activePage: WorkspacePage = "home";
   private shares: ShareListItemResponse[] = [];
+  private folderShares: FolderShareResponse[] = [];
   private sharesLoaded = false;
   private sharesLoading = false;
   private sharesError = "";
   private sharesKey = "";
   private importUrl = "";
   private importLoading = false;
+  private importProgress: MediaNoteProgress | "" = "";
+  private importCancelRequested = false;
   private importError = "";
   private importSuccess = "";
+  private dragDepth = 0;
+  private activeDragPath = "";
 
   constructor(leaf: WorkspaceLeaf, private readonly host: DashboardHost) {
     super(leaf);
@@ -75,7 +99,6 @@ export class DocferryDashboardView extends ItemView {
 
   async onOpen(): Promise<void> {
     this.render();
-    this.host.refreshMembershipForDashboardOpen();
   }
 
   refreshForAuthChange(): void {
@@ -90,10 +113,17 @@ export class DocferryDashboardView extends ItemView {
     if (this.activePage === "shares" && this.hasAuthForShares()) void this.refreshShares();
   }
 
+  showHomePage(): void {
+    this.openHomePage();
+  }
+
+  showSharesPage(): void {
+    this.openSharesPage();
+  }
+
   showAccountPage(): void {
     this.activePage = "account";
     this.render();
-    this.host.refreshMembershipForDashboardOpen();
   }
 
   private render(): void {
@@ -101,86 +131,297 @@ export class DocferryDashboardView extends ItemView {
     contentEl.empty();
     contentEl.addClass("docferry-dashboard-view");
 
-    const shell = contentEl.createDiv({ cls: "docferry-workspace-shell" });
+    const isHome = this.activePage === "home";
+    const hasExpandedHomeState = Boolean(
+      this.importLoading
+      || this.importProgress
+      || this.importError
+      || this.importSuccess
+      || this.host.docferrySettings.pendingMediaNoteImport
+    );
+    contentEl.toggleClass("is-home-page", isHome);
+    contentEl.toggleClass("has-expanded-home-state", isHome && hasExpandedHomeState);
+    const shell = contentEl.createDiv({
+      cls: [
+        "docferry-workspace-shell",
+        isHome ? "is-home-page" : "",
+        isHome && hasExpandedHomeState ? "has-expanded-home-state" : ""
+      ].filter(Boolean).join(" ")
+    });
     this.renderTopbar(shell);
     const body = shell.createDiv({ cls: "docferry-workspace-content" });
-    if (this.activePage === "import") this.renderImportHome(body);
+    if (this.activePage === "home") this.renderHome(body);
     if (this.activePage === "shares") this.renderSharesPage(body);
     if (this.activePage === "account") this.renderAccountPage(body);
   }
 
   private renderTopbar(containerEl: HTMLElement): void {
     const topbar = containerEl.createDiv({ cls: "docferry-workspace-topbar" });
-    const brandButton = topbar.createEl("button", { cls: "docferry-workspace-brand", attr: { type: "button" } });
-    appendDocferryLogo(brandButton, "docferry-workspace-brand-mark");
-    const brandCopy = brandButton.createSpan({ cls: "docferry-workspace-brand-copy" });
+    const brand = topbar.createDiv({
+      cls: "docferry-workspace-brand",
+      attr: {
+        role: "button",
+        tabindex: "0",
+        "aria-label": "Open DocFerry dashboard",
+        title: "Open DocFerry dashboard"
+      }
+    });
+    appendDocferryLogo(brand, "docferry-workspace-brand-mark");
+    const brandCopy = brand.createSpan({ cls: "docferry-workspace-brand-copy" });
     brandCopy.createSpan({ text: "DocFerry", cls: "docferry-workspace-brand-title" });
-    brandCopy.createSpan({ text: "Share Obsidian notes on the web", cls: "docferry-workspace-brand-subtitle" });
-    brandButton.addEventListener("click", () => {
+    brandCopy.createSpan({ text: "Save and share", cls: "docferry-workspace-brand-subtitle" });
+    brand.addEventListener("click", () => void this.host.openDashboardHome());
+    brand.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
       void this.host.openDashboardHome();
     });
   }
 
-  private renderImportHome(containerEl: HTMLElement): void {
-    const home = containerEl.createDiv({ cls: "docferry-import-home" });
+  private renderHome(containerEl: HTMLElement): void {
+    const canUseDetailedNote = this.host.docferrySettings.membership?.canUseMediaNote === true;
+    const home = containerEl.createDiv({ cls: "docferry-import-home docferry-share-drop-surface" });
     const panel = home.createDiv({ cls: "docferry-import-panel" });
-    appendDocferryLogo(panel, "docferry-import-mark docferry-import-logo").setAttr("aria-hidden", "true");
-    panel.createDiv({ text: "Import a DocFerry link", cls: "docferry-heading docferry-heading-2" });
-    panel.createEl("p", {
-      text: "Paste a DocFerry URL. The note opens in Obsidian."
+    const dropOverlay = panel.createDiv({
+      cls: "docferry-share-drop-overlay",
+      attr: { role: "status", "aria-live": "polite", "aria-atomic": "true" }
     });
+    const dropCue = dropOverlay.createDiv({ cls: "docferry-share-drop-cue" });
+    const dropIcon = dropCue.createSpan({
+      cls: "docferry-share-drop-overlay-icon",
+      attr: { "aria-hidden": "true" }
+    });
+    setIcon(dropIcon, "upload-cloud");
+    dropCue.createEl("h3", {
+      text: "Share from this vault",
+      cls: "docferry-heading docferry-heading-3 docferry-share-drop-title"
+    });
+    dropCue.createEl("p", {
+      text: "Release a note or folder to review sharing options.",
+      cls: "docferry-share-drop-detail"
+    });
+    const dropGuard = dropCue.createDiv({ cls: "docferry-share-drop-guard" });
+    const guardIcon = dropGuard.createSpan({ attr: { "aria-hidden": "true" } });
+    setIcon(guardIcon, "shield-check");
+    dropGuard.createSpan({ text: "Nothing is published until you confirm." });
+    this.registerShareDropSurface(home);
+    const intro = panel.createDiv({ cls: "docferry-import-intro" });
+    appendDocferryLogo(intro, "docferry-import-mark docferry-import-logo").setAttr("aria-hidden", "true");
+    const introCopy = intro.createDiv({ cls: "docferry-import-intro-copy" });
+    introCopy.createEl("h2", { text: "Save to Obsidian", cls: "docferry-heading docferry-heading-2" });
+    introCopy.createEl("p", { text: "Paste one public link. DocFerry chooses the best way to save it." });
+
+    const scope = panel.createDiv({ cls: "docferry-import-scope", attr: { "aria-label": "Supported link types" } });
+    this.renderImportScope(scope, "files", "DocFerry shares");
+    this.renderImportScope(scope, "globe-2", "Web pages");
+    this.renderImportScope(scope, "video", "Video");
+    this.renderImportScope(scope, "audio-lines", "Audio");
 
     const fieldId = "docferry-dashboard-import-url";
     const field = panel.createDiv({ cls: "docferry-import-field" });
-    field.createEl("label", { text: "Share URL", attr: { for: fieldId } });
+    field.createEl("label", { text: "Paste a link", attr: { for: fieldId } });
     const row = field.createDiv({ cls: "docferry-import-row" });
     const input = row.createEl("input", {
       type: "text",
-      placeholder: "https://docferry.fuyonder.tech/s/...",
+      placeholder: "Paste any public link",
       cls: "docferry-import-url-input",
-      attr: { id: fieldId, "aria-describedby": "docferry-import-help" }
+      attr: { id: fieldId, autocomplete: "off" }
     });
     input.value = this.importUrl;
+    input.disabled = this.importLoading;
     input.addEventListener("input", () => {
       this.importUrl = input.value;
       this.importError = "";
       this.importSuccess = "";
+      importButton.disabled = this.importLoading || !isValidWebUrl(this.importUrl);
     });
     input.addEventListener("keydown", (event) => {
       if (event.key === "Enter") void this.handleImport();
     });
 
     const importButton = row.createEl("button", { cls: "mod-cta", attr: { type: "button" } });
-    appendButtonLabel(importButton, "download", this.importLoading ? "Importing" : "Import");
-    importButton.disabled = this.importLoading;
+    appendButtonLabel(importButton, "download", this.importLoading ? "Saving" : "Save");
+    importButton.disabled = this.importLoading || !isValidWebUrl(this.importUrl);
     importButton.addEventListener("click", () => {
       void this.handleImport();
     });
 
-    field.createEl("p", {
-      text: "Password prompt appears when needed.",
-      cls: "docferry-import-help",
-      attr: { id: "docferry-import-help" }
+    const guidance = field.createDiv({ cls: "docferry-import-guidance" });
+    const guidanceIcon = guidance.createSpan({ attr: { "aria-hidden": "true" } });
+    setIcon(guidanceIcon, canUseDetailedNote ? "sparkles" : "link");
+    guidance.createSpan({
+      text: canUseDetailedNote
+        ? "Saving creates a note in your vault. Shared notes save instantly; web and media links may take a few minutes."
+        : "Saving creates a note in your vault. Shared notes import directly; other public links become simple notes."
     });
 
-    if (this.importError) panel.createDiv({ text: this.importError, cls: "docferry-dashboard-inline-error" });
-    if (this.importSuccess) panel.createDiv({ text: this.importSuccess, cls: "docferry-dashboard-inline-success" });
-
-    const shortcuts = panel.createDiv({ cls: "docferry-import-shortcuts" });
-    this.renderShortcut(shortcuts, "files", "View shares", "Published links.", () => this.openSharesPage());
-    this.renderShortcut(shortcuts, "settings", "Settings", "Plugin settings.", () => this.host.openSettingsTab());
-
-    if (!this.importLoading) {
-      window.setTimeout(() => input.focus(), 50);
+    if (this.importLoading) {
+      const status = panel.createDiv({
+        cls: "docferry-import-progress",
+        attr: { role: "status", "aria-live": "polite" }
+      });
+      const statusIcon = status.createSpan({
+        cls: "docferry-import-progress-icon",
+        attr: { "aria-hidden": "true" }
+      });
+      setIcon(statusIcon, "loader-circle");
+      const statusCopy = status.createSpan({ cls: "docferry-import-progress-copy" });
+      statusCopy.createSpan({
+        text: this.importProgress ? "Preparing your note" : "Saving to Obsidian",
+        cls: "docferry-import-progress-title"
+      });
+      statusCopy.createSpan({
+        text: this.importProgress ? mediaNoteProgressMessage(this.importProgress) : "This should only take a moment."
+      });
+      if (this.importProgress) {
+        statusCopy.createSpan({ text: "You can keep working. A preview will open when the note is ready." });
+        const cancelButton = status.createEl("button", {
+          cls: "docferry-import-cancel",
+          attr: { type: "button" }
+        });
+        appendButtonLabel(cancelButton, "x", this.importCancelRequested ? "Cancelling" : "Cancel");
+        cancelButton.disabled = this.importCancelRequested;
+        cancelButton.addEventListener("click", () => void this.cancelImport());
+      }
+    } else if (this.host.docferrySettings.pendingMediaNoteImport) {
+      const recovery = panel.createDiv({
+        cls: "docferry-import-progress docferry-import-recovery",
+        attr: { role: "status", "aria-live": "polite" }
+      });
+      const recoveryIcon = recovery.createSpan({ attr: { "aria-hidden": "true" } });
+      setIcon(recoveryIcon, "history");
+      const recoveryCopy = recovery.createSpan({ cls: "docferry-import-progress-copy" });
+      recoveryCopy.createSpan({ text: "Detailed note still processing", cls: "docferry-import-progress-title" });
+      recoveryCopy.createSpan({ text: "Resume this task or cancel it. Starting another will not duplicate the work." });
+      const recoveryActions = recovery.createDiv({ cls: "docferry-import-recovery-actions" });
+      const resumeButton = recoveryActions.createEl("button", { cls: "mod-cta", attr: { type: "button" } });
+      appendButtonLabel(resumeButton, "play", "Resume");
+      resumeButton.addEventListener("click", () => void this.resumeImport());
+      const cancelButton = recoveryActions.createEl("button", { attr: { type: "button" } });
+      appendButtonLabel(cancelButton, "x", "Cancel");
+      cancelButton.addEventListener("click", () => void this.cancelPendingImport());
     }
+
+    if (this.importError) panel.createDiv({ text: this.importError, cls: "docferry-dashboard-inline-error" });
+    if (this.importSuccess) this.renderImportSuccess(panel, input);
+
+    const shortcuts = home.createDiv({ cls: "docferry-import-shortcuts", attr: { "aria-label": "DocFerry pages" } });
+    this.renderShortcut(shortcuts, "files", "Shares", "Published content", () => this.openSharesPage());
+    if (this.host.docferrySettings.sessionToken) {
+      this.renderShortcut(shortcuts, "layout-dashboard", "Dashboard", "Membership and billing", () => {
+        void this.host.openDashboardHome();
+      });
+    } else {
+      this.renderShortcut(shortcuts, "log-in", "Sign in", "Connect your Bondie account", () => {
+        void this.host.startLogin();
+      });
+    }
+    this.renderShortcut(shortcuts, "settings", "Preferences", "Plugin defaults", () => this.host.openSettingsTab());
+
+    if (!this.importLoading) window.setTimeout(() => input.focus(), 50);
+  }
+
+  private renderImportSuccess(containerEl: HTMLElement, input: HTMLInputElement): void {
+    const message = containerEl.createDiv({
+      cls: "docferry-dashboard-inline-success",
+      attr: { role: "status", "aria-live": "polite" }
+    });
+    const statusIcon = message.createSpan({
+      cls: "docferry-dashboard-inline-message-icon",
+      attr: { "aria-hidden": "true" }
+    });
+    setIcon(statusIcon, "circle-check");
+    message.createSpan({ text: this.importSuccess, cls: "docferry-dashboard-inline-message-copy" });
+    const dismissButton = message.createEl("button", {
+      cls: "docferry-dashboard-inline-message-dismiss",
+      attr: { type: "button", "aria-label": "Dismiss saved message", title: "Dismiss" }
+    });
+    setIcon(dismissButton, "x");
+    dismissButton.addEventListener("click", () => {
+      this.importSuccess = "";
+      message.remove();
+      input.focus();
+    });
+  }
+
+  private renderImportScope(containerEl: HTMLElement, icon: string, label: string): void {
+    const item = containerEl.createSpan({ cls: "docferry-import-scope-item" });
+    const iconEl = item.createSpan({ attr: { "aria-hidden": "true" } });
+    setIcon(iconEl, icon);
+    item.createSpan({ text: label });
+  }
+
+  private registerShareDropSurface(surface: HTMLElement): void {
+    const pathFrom = (event: DragEvent): string | null => this.host.vaultPathFromDrag(event);
+    const positionCue = (event: DragEvent): void => {
+      const bounds = surface.getBoundingClientRect();
+      if (!bounds.width || !bounds.height) return;
+      surface.style.setProperty("--df-drop-x", `${Math.max(0, Math.min(bounds.width, event.clientX - bounds.left))}px`);
+      surface.style.setProperty("--df-drop-y", `${Math.max(0, Math.min(bounds.height, event.clientY - bounds.top))}px`);
+    };
+    const activate = (path: string, event: DragEvent): void => {
+      if (path !== this.activeDragPath) {
+        this.activeDragPath = path;
+        this.updateShareDropCue(surface, path);
+      }
+      positionCue(event);
+      surface.addClass("is-drag-active");
+    };
+    const clear = (): void => {
+      this.dragDepth = 0;
+      this.activeDragPath = "";
+      surface.style.removeProperty("--df-drop-x");
+      surface.style.removeProperty("--df-drop-y");
+      surface.removeClass("is-drag-active");
+    };
+    surface.addEventListener("dragenter", (event) => {
+      const path = pathFrom(event);
+      if (!path) return;
+      event.preventDefault();
+      this.dragDepth += 1;
+      activate(path, event);
+    });
+    surface.addEventListener("dragover", (event) => {
+      const path = pathFrom(event);
+      if (!path) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+      activate(path, event);
+    });
+    surface.addEventListener("dragleave", () => {
+      this.dragDepth = Math.max(0, this.dragDepth - 1);
+      if (!this.dragDepth) clear();
+    });
+    surface.addEventListener("drop", (event) => {
+      const path = pathFrom(event);
+      clear();
+      if (!path) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void this.host.publishVaultPath(path);
+    });
+  }
+
+  private updateShareDropCue(surface: HTMLElement, path: string): void {
+    const item = this.host.app.vault.getAbstractFileByPath(path);
+    const isFolder = item instanceof TFolder;
+    const displayName = item instanceof TFile ? item.basename : item?.name || path.split("/").pop() || path;
+    const icon = surface.querySelector<HTMLElement>(".docferry-share-drop-overlay-icon");
+    const title = surface.querySelector<HTMLElement>(".docferry-share-drop-title");
+    const detail = surface.querySelector<HTMLElement>(".docferry-share-drop-detail");
+    if (icon) setIcon(icon, isFolder ? "folder-up" : "file-up");
+    if (title) title.textContent = isFolder ? "Share this folder" : "Share this note";
+    if (detail) detail.textContent = `Release to review "${displayName}".`;
   }
 
   private renderSharesPage(containerEl: HTMLElement): void {
     const page = containerEl.createDiv({ cls: "docferry-workspace-page" });
     this.renderPageHeader(
       page,
-      "Shared documents",
-      "Owner-scoped documents across your vaults.",
+      "Shares",
+      this.sharesLoaded
+        ? shareListSummary([...this.shares, ...this.folderShares].map((share) => share.status))
+        : "Shared notes and folders from this account.",
       "Refresh",
       "refresh-cw",
       () => void this.refreshShares()
@@ -190,7 +431,11 @@ export class DocferryDashboardView extends ItemView {
     if (this.sharesKey && this.sharesKey !== currentKey) this.resetShares();
 
     if (!this.hasAuthForShares()) {
-      this.renderEmpty(page, "Connect required", "Connect your Fuyonder account first.");
+      this.renderEmpty(page, "Log in to view shares", "Connect your Bondie account to manage published notes and folders.", false, {
+        label: "Log in",
+        icon: "log-in",
+        action: () => void this.host.startLogin()
+      });
       return;
     }
 
@@ -205,119 +450,218 @@ export class DocferryDashboardView extends ItemView {
     }
 
     if (!this.sharesLoaded) {
-      this.renderEmpty(page, "Shares not loaded", "Click Refresh to load your published documents.");
+      this.renderEmpty(page, "Shares not loaded", "Refresh to load your shared notes.");
       return;
     }
 
-    if (!this.shares.length) {
-      this.renderEmpty(page, "No shares yet", "Publish a note from the file menu or command palette.");
+    if (!this.shares.length && !this.folderShares.length) {
+      this.renderEmpty(page, "No shares yet", "Publish a note when you are ready.");
       return;
     }
 
-    const list = page.createDiv({ cls: "docferry-share-list docferry-workspace-share-list" });
-    for (const share of this.shares) {
-      const row = list.createDiv({ cls: "docferry-share-row docferry-workspace-share-row" });
-      const main = row.createDiv({ cls: "docferry-share-main" });
-      main.createDiv({ text: share.title || share.source_path, cls: "docferry-heading docferry-heading-4" });
-      main.createEl("p", { text: share.source_path });
-      const meta = main.createDiv({ cls: "docferry-share-meta" });
-      meta.createSpan({ text: vaultLabel(share) });
-      meta.createSpan({ text: `Updated ${formatDateTime(share.updated_at)}` });
-      meta.createSpan({ text: expiryLabel(share) });
+    if (this.folderShares.length) {
+      page.createEl("h3", { text: "Folders", cls: "docferry-heading docferry-heading-4 docferry-share-group-title" });
+      const folderList = page.createDiv({ cls: "docferry-share-list docferry-workspace-share-list" });
+      for (const folderShare of this.folderShares) this.renderFolderShareRow(folderList, folderShare);
+    }
+    if (this.shares.length) {
+      page.createEl("h3", { text: "Notes", cls: "docferry-heading docferry-heading-4 docferry-share-group-title" });
+    }
+    if (this.shares.length) {
+      const list = page.createDiv({ cls: "docferry-share-list docferry-workspace-share-list" });
+      for (const share of this.shares) {
+        const row = list.createDiv({ cls: "docferry-share-row docferry-workspace-share-row docferry-share-row--compact" });
+        const main = row.createDiv({ cls: "docferry-share-main" });
+        main.createEl("h4", { text: share.title || share.source_path, cls: "docferry-heading docferry-heading-4" });
+        main.createEl("p", { text: share.source_path });
+        const meta = main.createDiv({ cls: "docferry-share-meta" });
+        meta.createSpan({ text: vaultLabel(share) });
+        meta.createSpan({ text: `Updated ${formatDateTime(share.updated_at)}` });
+        if (share.expires_at && share.status !== "stopped") {
+          meta.createSpan({ text: expiryLabel(share) });
+        }
 
-      const badges = row.createDiv({ cls: "docferry-share-badges" });
-      badges.createSpan({ text: statusLabel(share.status), cls: `docferry-pill ${statusClass(share.status)}` });
-      badges.createSpan({
-        text: share.password_enabled ? "Password on" : "No password",
-        cls: `docferry-pill ${share.password_enabled ? "is-locked" : ""}`
-      });
+        const badges = row.createDiv({ cls: "docferry-share-badges" });
+        badges.createSpan({ text: statusLabel(share.status), cls: `docferry-pill ${statusClass(share.status)}` });
+        if (share.password_enabled) badges.createSpan({ text: "Password", cls: "docferry-pill is-locked" });
 
-      const actions = row.createDiv({ cls: "docferry-share-actions" });
-      const copyButton = actions.createEl("button", { attr: { type: "button", "aria-label": "Copy share URL" } });
+        const actions = row.createDiv({ cls: "docferry-share-actions" });
+        if (hasActiveShareLink(share.status)) {
+          const copyButton = actions.createEl("button", { attr: { type: "button", "aria-label": "Copy share URL" } });
+          appendButtonLabel(copyButton, "copy", "Copy");
+          addAsyncClickListener(copyButton, async () => {
+            await navigator.clipboard.writeText(share.url);
+            new Notice("Share link copied");
+          });
+          const openButton = actions.createEl("button", { attr: { type: "button", "aria-label": "Open share URL" } });
+          appendButtonLabel(openButton, "external-link", "Open");
+          openButton.addEventListener("click", () => {
+            openExternalUrl(share.url);
+          });
+          const linksButton = actions.createEl("button", { attr: { type: "button", "aria-label": "Show linked note status" } });
+          appendButtonLabel(linksButton, "list-checks", "Links");
+          addAsyncClickListener(linksButton, async () => {
+            await this.host.openShareLinks(share);
+          });
+          const updateButton = actions.createEl("button", { attr: { type: "button", "aria-label": "Update share" } });
+          appendButtonLabel(updateButton, "upload-cloud", "Update");
+          addAsyncClickListener(updateButton, async () => {
+            await this.host.updateShareFromList(share);
+          });
+        }
+        if (hasActiveShareLink(share.status)) {
+          const moreButton = actions.createEl("button", {
+            cls: "docferry-icon-button",
+            attr: {
+              type: "button",
+              "aria-label": `More actions for ${share.title || share.source_path}`,
+              title: "More actions"
+            }
+          });
+          appendIconOnly(moreButton, "more-horizontal");
+          moreButton.addEventListener("click", () => this.showShareMenu(moreButton, share));
+        } else {
+          const deleteButton = actions.createEl("button", {
+            cls: "docferry-delete-history-button",
+            attr: { type: "button", "aria-label": `Delete history for ${share.title || share.source_path}` }
+          });
+          appendButtonLabel(deleteButton, "trash-2", "Delete");
+          addAsyncClickListener(deleteButton, async () => {
+            await this.host.deleteShareHistory(share);
+            await this.refreshShares();
+          });
+        }
+      }
+    }
+  }
+
+  private renderFolderShareRow(containerEl: HTMLElement, folderShare: FolderShareResponse): void {
+    const row = containerEl.createDiv({ cls: "docferry-share-row docferry-workspace-share-row docferry-share-row--compact" });
+    const main = row.createDiv({ cls: "docferry-share-main" });
+    main.createEl("h4", { text: folderShare.title, cls: "docferry-heading docferry-heading-4" });
+    main.createEl("p", { text: folderShare.source_folder });
+    const meta = main.createDiv({ cls: "docferry-share-meta" });
+    meta.createSpan({ text: `${folderShare.document_count} notes` });
+    meta.createSpan({ text: `Updated ${formatDateTime(folderShare.updated_at)}` });
+    meta.createSpan({ text: folderShare.theme_mode === "full" ? "Theme styling" : "Reader style" });
+
+    const badges = row.createDiv({ cls: "docferry-share-badges" });
+    badges.createSpan({ text: statusLabel(folderShare.status), cls: `docferry-pill ${statusClass(folderShare.status)}` });
+    if (folderShare.password_enabled) badges.createSpan({ text: "Password", cls: "docferry-pill is-locked" });
+
+    const actions = row.createDiv({ cls: "docferry-share-actions" });
+    if (hasActiveShareLink(folderShare.status)) {
+      const copyButton = actions.createEl("button", { attr: { type: "button", "aria-label": "Copy folder share URL" } });
       appendButtonLabel(copyButton, "copy", "Copy");
       addAsyncClickListener(copyButton, async () => {
-        await navigator.clipboard.writeText(share.url);
-        new Notice("Share link copied");
+        await navigator.clipboard.writeText(folderShare.url);
+        new Notice("Folder share link copied");
       });
-      const openButton = actions.createEl("button", { attr: { type: "button", "aria-label": "Open share URL" } });
+      const openButton = actions.createEl("button", { attr: { type: "button", "aria-label": "Open folder share" } });
       appendButtonLabel(openButton, "external-link", "Open");
-      openButton.addEventListener("click", () => {
-        window.open(share.url);
-      });
-      const linksButton = actions.createEl("button", { attr: { type: "button", "aria-label": "Show linked note status" } });
-      appendButtonLabel(linksButton, "list-checks", "Links");
-      addAsyncClickListener(linksButton, async () => {
-        await this.host.openShareLinks(share);
-      });
-      const updateButton = actions.createEl("button", { attr: { type: "button", "aria-label": "Update share" } });
+      openButton.addEventListener("click", () => openExternalUrl(folderShare.url));
+      const updateButton = actions.createEl("button", { attr: { type: "button", "aria-label": "Update folder share" } });
       appendButtonLabel(updateButton, "upload-cloud", "Update");
-      updateButton.disabled = share.status === "stopped";
       addAsyncClickListener(updateButton, async () => {
-        await this.host.updateShareFromList(share);
+        await this.host.updateFolderShareFromList(folderShare);
       });
-      if (share.status === "stopped" || share.status === "expired") {
-        actions.createSpan({ text: statusLabel(share.status), cls: "docferry-action-state" });
-      } else {
-        const stopButton = actions.createEl("button", {
-          cls: "docferry-stop-share-button",
-          attr: { type: "button", "aria-label": "Stop sharing" }
-        });
-        appendButtonLabel(stopButton, "unlink", "Stop sharing");
-        addAsyncClickListener(stopButton, async () => {
-          await this.host.stopShareFromList(share);
-          await this.refreshShares();
-        });
-      }
+    }
+    if (hasActiveShareLink(folderShare.status)) {
+      const moreButton = actions.createEl("button", {
+        cls: "docferry-icon-button",
+        attr: { type: "button", "aria-label": `More actions for ${folderShare.title}`, title: "More actions" }
+      });
+      appendIconOnly(moreButton, "more-horizontal");
+      moreButton.addEventListener("click", () => this.showFolderShareMenu(moreButton, folderShare));
+    } else {
+      const deleteButton = actions.createEl("button", {
+        cls: "docferry-delete-history-button",
+        attr: { type: "button", "aria-label": `Delete history for ${folderShare.title}` }
+      });
+      appendButtonLabel(deleteButton, "trash-2", "Delete");
+      addAsyncClickListener(deleteButton, async () => {
+        await this.host.deleteFolderShareHistory(folderShare);
+        await this.refreshShares();
+      });
     }
   }
 
   private renderAccountPage(containerEl: HTMLElement): void {
     const page = containerEl.createDiv({ cls: "docferry-workspace-page docferry-account-page" });
-    this.renderPageHeader(page, "Account", "Connection state for publishing and imports.");
+    this.renderPageHeader(page, "Account", "Your DocFerry plan and signed-in Bondie account.");
 
-    const account = this.host.settings.connectedAccount;
-    const hasManualToken = Boolean(this.host.settings.manualApiToken || this.host.settings.apiToken);
-    const connected = this.host.settings.authMode === "company-sso" ? Boolean(account) : hasManualToken;
-    const displayName =
-      account?.displayUser?.name ||
-      account?.displayUser?.email ||
-      (this.host.settings.authMode === "manual-token" && hasManualToken ? "Internal token" : "Not connected");
+    const account = this.host.docferrySettings.connectedAccount;
+    const connected = Boolean(this.host.docferrySettings.sessionToken);
+    const displayName = account?.displayUser?.name || account?.displayUser?.email || "Not connected";
 
     const card = page.createDiv({ cls: "docferry-account-card docferry-workspace-account-card" });
-    renderAccountAvatar(card, account?.displayUser, "docferry-account-avatar");
+    if (connected) {
+      renderAccountAvatar(card, account?.displayUser, "docferry-account-avatar");
+    } else {
+      const placeholder = card.createDiv({ cls: "docferry-account-avatar is-placeholder", attr: { "aria-hidden": "true" } });
+      setIcon(placeholder, "user");
+    }
     const details = card.createDiv({ cls: "docferry-account-details" });
-    details.createDiv({ text: displayName, cls: "docferry-heading docferry-heading-4" });
+    details.createEl("h3", { text: displayName, cls: "docferry-heading docferry-heading-4" });
     details.createEl("p", {
-      text:
-        this.host.settings.authMode === "company-sso"
-          ? connected
-            ? "Fuyonder account is connected."
-            : "Connect your Fuyonder account."
-          : "Internal token mode is active."
+      text: connected
+        ? "Signed in with Bondie"
+        : "Connect once to publish, import shares, and use account features."
     });
     if (account?.displayUser?.email && account.displayUser.email !== displayName) {
       details.createEl("p", { text: account.displayUser.email });
     }
-    if (account?.connectedAt) details.createEl("p", { text: `Connected ${formatDateTime(account.connectedAt)}` });
+    if (!connected) {
+      this.renderAccountQuickActions(page, false);
+      return;
+    }
 
-    const membership = this.host.settings.membership;
+    const membership = this.host.docferrySettings.membership;
     const membershipCard = page.createDiv({ cls: "docferry-membership-card docferry-workspace-membership-card" });
     const membershipHeader = membershipCard.createDiv({ cls: "docferry-membership-header" });
     const membershipCopy = membershipHeader.createDiv();
-    membershipCopy.createDiv({ text: "Access limits", cls: "docferry-heading docferry-heading-4" });
+    membershipCopy.createEl("h3", { text: "Plan and usage", cls: "docferry-heading docferry-heading-4" });
     membershipCopy.createEl("p", {
       text: membership
-        ? `${membershipAccessLabel(membership)} limits refreshed ${formatDateTime(membership.refreshedAt)}.`
-        : "Access limits have not been refreshed."
+        ? `Updated ${formatDateTime(membership.refreshedAt)}.`
+        : "Refresh to load your current plan."
     });
     membershipHeader.createSpan({
       text: membership?.planDisplayName || "Unknown",
       cls: `docferry-status-badge ${membership && membership.planKey !== "free" ? "is-ok" : ""}`
     });
     const membershipStats = membershipCard.createDiv({ cls: "docferry-membership-stats" });
-    renderMembershipStat(membershipStats, "Active shares", membership ? `${membership.activeShareCount}/${membership.activeShareLimit}` : "-");
-    renderMembershipStat(membershipStats, "Single file", membership ? formatBytes(membership.maxSingleFileSizeBytes) : "-");
-    renderMembershipStat(membershipStats, "Access", membership ? membershipAccessLabel(membership) : "-");
+    renderMembershipStat(
+      membershipStats,
+      "Shares",
+      membership ? membershipUsageLabel(membership.activeShareCount, membership.activeShareLimit) : "-"
+    );
+    renderMembershipStat(
+      membershipStats,
+      "Folders",
+      membership ? membershipUsageLabel(membership.activeFolderShareCount, membership.activeFolderShareLimit) : "-"
+    );
+    renderMembershipStat(membershipStats, "File size", membership ? formatBytes(membership.maxSingleFileSizeBytes) : "-");
+    renderMembershipStat(
+      membershipStats,
+      "Advanced imports",
+      membership
+        ? membership.mediaNoteMonthlyJobLimit === null
+          ? `${membership.mediaNoteMonthlyJobsUsed} this month`
+          : membershipUsageLabel(membership.mediaNoteMonthlyJobsUsed, membership.mediaNoteMonthlyJobLimit)
+        : "-"
+    );
+    if (membership?.hasMediaNoteEntitlement) {
+      membershipCard.createDiv({
+        text: `Detailed web, audio, and video notes plus Obsidian-inspired theme styling. Usage resets ${formatCalendarDate(membership.mediaNoteResetsAt)}.`,
+        cls: "docferry-membership-benefit-note"
+      });
+    } else if (membership) {
+      membershipCard.createDiv({
+        text: "Pro adds detailed web, audio, and video notes, folder sharing, and Obsidian-inspired theme styling.",
+        cls: "docferry-membership-benefit-note"
+      });
+    }
     if (membership?.unavailableReason) {
       membershipCard.createDiv({
         text: membershipUnavailableMessage(membership.unavailableReason),
@@ -325,53 +669,41 @@ export class DocferryDashboardView extends ItemView {
       });
     }
 
-    if (membership?.billingEnabled) {
-      const center = membershipCard.createDiv({ cls: "docferry-membership-center" });
-      const centerCopy = center.createDiv({ cls: "docferry-membership-center-copy" });
-      centerCopy.createDiv({ text: "Billing", cls: "docferry-heading docferry-heading-5" });
-      centerCopy.createEl("p", { text: "Manage paid access on the DocFerry web dashboard." });
-      const centerButton = center.createEl("button", { cls: "mod-cta", attr: { type: "button" } });
-      appendButtonLabel(centerButton, "external-link", "Open billing");
-      centerButton.disabled = !this.host.settings.serverUrl || !connected;
-      addAsyncClickListener(centerButton, async () => {
-        await this.host.openMembershipCenter();
-      });
-    }
+    this.renderAccountQuickActions(page, connected);
+  }
 
-    const requestPanel = page.createDiv({ cls: "docferry-account-request-panel" });
-    const requestCopy = requestPanel.createDiv({ cls: "docferry-account-request-copy" });
-    requestCopy.createDiv({ text: "Need more capacity?", cls: "docferry-heading docferry-heading-4" });
-    requestCopy.createEl("p", {
-      text: connected
-        ? "Tell us what you want to publish. DocFerry staff review early requests and can upgrade approved accounts to Plus."
-        : "Connect your Fuyonder account before requesting Plus access."
+  private renderAccountQuickActions(containerEl: HTMLElement, connected: boolean): void {
+    const actions = containerEl.createDiv({
+      cls: "docferry-workspace-page-actions docferry-account-primary-actions docferry-account-quick-actions"
     });
-    const requestButton = requestPanel.createEl("button", { cls: "mod-cta", attr: { type: "button" } });
-    appendButtonLabel(requestButton, "send", "Request access");
-    requestButton.disabled = !connected || this.host.settings.authMode !== "company-sso";
-    addAsyncClickListener(requestButton, async () => {
-      await this.host.requestAccessUpgrade("plugin_dashboard");
+    const refreshButton = actions.createEl("button", { cls: connected ? "" : "mod-cta", attr: { type: "button" } });
+    appendButtonLabel(refreshButton, connected ? "refresh-cw" : "log-in", connected ? "Refresh" : "Log in");
+    addAsyncClickListener(refreshButton, async () => {
+      if (connected) {
+        await this.host.refreshMembership(true);
+      } else {
+        await this.host.startLogin();
+      }
       this.render();
     });
-
-    const actions = page.createDiv({ cls: "docferry-workspace-page-actions docferry-account-primary-actions" });
-    if (this.host.settings.authMode === "company-sso") {
-      const refreshButton = actions.createEl("button", { cls: "mod-cta", attr: { type: "button" } });
-      appendButtonLabel(refreshButton, connected ? "refresh-cw" : "log-in", connected ? "Refresh account" : "Connect");
-      addAsyncClickListener(refreshButton, async () => {
-        if (connected) {
-          await this.host.refreshMembership(true);
-        } else {
-          await this.host.startLogin();
-        }
+    if (!connected) {
+      const signupButton = actions.createEl("button", { attr: { type: "button" } });
+      appendButtonLabel(signupButton, "user-plus", "Create account");
+      addAsyncClickListener(signupButton, async () => {
+        await this.host.startSignup();
         this.render();
       });
     }
-    const settingsButton = actions.createEl("button", { attr: { type: "button" } });
-    appendButtonLabel(settingsButton, "settings", "Settings");
-    settingsButton.addEventListener("click", () => {
-      this.host.openSettingsTab();
+    if (!connected) return;
+    const dashboardButton = actions.createEl("button", { cls: "mod-cta", attr: { type: "button" } });
+    appendButtonLabel(dashboardButton, "layout-dashboard", "Open dashboard");
+    addAsyncClickListener(dashboardButton, async () => this.host.openDashboardHome());
+    const moreButton = actions.createEl("button", {
+      cls: "docferry-icon-button",
+      attr: { type: "button", "aria-label": "More account actions", title: "More account actions" }
     });
+    appendIconOnly(moreButton, "more-horizontal");
+    moreButton.addEventListener("click", () => this.showAccountMenu(moreButton));
   }
 
   private renderPageHeader(
@@ -383,19 +715,25 @@ export class DocferryDashboardView extends ItemView {
     action?: () => void
   ): void {
     const header = containerEl.createDiv({ cls: "docferry-workspace-page-header" });
-    const backButton = header.createEl("button", { cls: "docferry-workspace-back", attr: { type: "button" } });
-    appendButtonLabel(backButton, "arrow-left", "Import");
+    const backButton = header.createEl("button", {
+      cls: "docferry-workspace-back docferry-icon-button",
+      attr: { type: "button", "aria-label": "Back to DocFerry home", title: "Home" }
+    });
+    appendIconOnly(backButton, "arrow-left");
     backButton.addEventListener("click", () => {
-      this.openImportPage();
+      this.openHomePage();
     });
 
     const copy = header.createDiv({ cls: "docferry-workspace-page-copy" });
-    copy.createDiv({ text: title, cls: "docferry-heading docferry-heading-2" });
+    copy.createEl("h1", { text: title, cls: "docferry-heading docferry-heading-2" });
     copy.createEl("p", { text: description });
 
     if (actionLabel && actionIcon && action) {
-      const actionButton = header.createEl("button", { attr: { type: "button" } });
-      appendButtonLabel(actionButton, actionIcon, actionLabel);
+      const actionButton = header.createEl("button", {
+        cls: "docferry-icon-button",
+        attr: { type: "button", "aria-label": actionLabel, title: actionLabel }
+      });
+      appendIconOnly(actionButton, actionIcon);
       actionButton.disabled = this.sharesLoading || !this.hasAuthForShares();
       actionButton.addEventListener("click", action);
     }
@@ -417,8 +755,8 @@ export class DocferryDashboardView extends ItemView {
     button.addEventListener("click", action);
   }
 
-  private openImportPage(): void {
-    this.activePage = "import";
+  private openHomePage(): void {
+    this.activePage = "home";
     this.render();
   }
 
@@ -428,19 +766,89 @@ export class DocferryDashboardView extends ItemView {
     if (this.hasAuthForShares() && !this.sharesLoaded && !this.sharesLoading) void this.refreshShares();
   }
 
-  private openAccountPage(): void {
-    this.showAccountPage();
-  }
-
   private async handleImport(): Promise<void> {
     const url = this.importUrl.trim();
-    if (!isValidShareUrl(url)) {
-      this.importError = "Enter a valid DocFerry share URL.";
+    if (!isValidWebUrl(url)) {
+      this.importError = "Enter a valid web URL.";
       this.importSuccess = "";
       this.render();
       return;
     }
+    if (!parseDocferryShareUrl(url, this.host.docferrySettings.serverUrl)) {
+      this.importLoading = true;
+      this.importCancelRequested = false;
+      this.importProgress = this.shouldPrepareDetailedNote(url) ? "starting" : "";
+      this.importError = "";
+      this.importSuccess = "";
+      this.render();
+      try {
+        const result = await this.host.importExternalLink(
+          url,
+          (progress) => {
+            this.importProgress = progress;
+            this.render();
+          }
+        );
+        if (!result) {
+          this.importSuccess = "Nothing was saved.";
+          return;
+        }
+        this.importUrl = "";
+        this.importSuccess = `Saved ${result.title} to ${result.notePath}.`;
+      } catch (error) {
+        if (this.importCancelRequested) {
+          this.importSuccess = "Import cancelled. Nothing was saved.";
+        } else {
+          this.importError = formatError(error, "Import failed");
+        }
+      } finally {
+        this.importLoading = false;
+        this.importProgress = "";
+        this.importCancelRequested = false;
+        this.render();
+      }
+      return;
+    }
     await this.runImport(url);
+  }
+
+  private async cancelImport(): Promise<void> {
+    if (!this.importLoading || !this.importProgress || this.importCancelRequested) return;
+    this.importCancelRequested = true;
+    this.render();
+    try {
+      await this.host.cancelActiveMediaImport();
+    } catch (error) {
+      this.importCancelRequested = false;
+      this.importError = formatError(error, "Could not cancel import");
+      this.render();
+    }
+  }
+
+  private async resumeImport(): Promise<void> {
+    this.importLoading = true;
+    this.importProgress = "reading";
+    this.importError = "";
+    this.importSuccess = "";
+    this.render();
+    try {
+      await this.host.resumeActiveMediaImport();
+    } finally {
+      this.importLoading = false;
+      this.importProgress = "";
+      this.render();
+    }
+  }
+
+  private async cancelPendingImport(): Promise<void> {
+    try {
+      await this.host.cancelActiveMediaImport();
+      this.importSuccess = "Import cancelled. Nothing was saved.";
+      this.importError = "";
+    } catch (error) {
+      this.importError = formatError(error, "Could not cancel import");
+    }
+    this.render();
   }
 
   private async runImport(url: string, password?: string): Promise<void> {
@@ -465,7 +873,7 @@ export class DocferryDashboardView extends ItemView {
         await this.runImport(url, nextPassword);
         return;
       }
-      this.importError = formatError(error, "Import failed");
+      this.importError = friendlyImportError(error);
     } finally {
       this.importLoading = false;
       this.render();
@@ -483,11 +891,17 @@ export class DocferryDashboardView extends ItemView {
     this.sharesKey = this.currentShareListKey();
     this.render();
     try {
-      this.shares = await this.host.listShares();
+      const [shares, folderShares] = await Promise.all([
+        this.host.listShares(),
+        this.host.listFolderShares()
+      ]);
+      this.shares = shares;
+      this.folderShares = folderShares;
       this.sharesLoaded = true;
     } catch (error) {
-      this.sharesError = error instanceof Error ? error.message : "Could not load shares.";
+      this.sharesError = friendlyShareListError(error);
       this.shares = [];
+      this.folderShares = [];
     } finally {
       this.sharesLoading = false;
       this.render();
@@ -496,6 +910,7 @@ export class DocferryDashboardView extends ItemView {
 
   private resetShares(): void {
     this.shares = [];
+    this.folderShares = [];
     this.sharesLoaded = false;
     this.sharesLoading = false;
     this.sharesError = "";
@@ -503,37 +918,115 @@ export class DocferryDashboardView extends ItemView {
   }
 
   private hasAuthForShares(): boolean {
-    if (this.host.settings.authMode === "company-sso") return Boolean(this.host.settings.sessionToken);
-    return Boolean(this.host.settings.manualApiToken || this.host.settings.apiToken);
+    return Boolean(this.host.docferrySettings.sessionToken);
   }
 
   private currentShareListKey(): string {
-    const settings = this.host.settings;
-    const tokenTail =
-      settings.authMode === "company-sso"
-        ? settings.sessionToken.slice(-8)
-        : (settings.manualApiToken || settings.apiToken).slice(-8);
-    const ownerHint =
-      settings.authMode === "company-sso"
-        ? settings.connectedAccount?.productSubjectId || "pending"
-        : "manual";
-    return `${settings.serverUrl}|${settings.authMode}|${ownerHint}|${tokenTail}`;
+    const settings = this.host.docferrySettings;
+    const tokenTail = settings.sessionToken.slice(-8);
+    const ownerHint = settings.connectedAccount?.productSubjectId || "pending";
+    return `${settings.serverUrl}|${ownerHint}|${tokenTail}`;
+  }
+
+  private showShareMenu(button: HTMLElement, share: ShareListItemResponse): void {
+    const menu = new Menu();
+    if (hasActiveShareLink(share.status)) {
+      menu.addItem((item) =>
+        item.setTitle("Stop sharing").setIcon("unlink").onClick(async () => {
+          await this.host.stopShareFromList(share);
+          await this.refreshShares();
+        })
+      );
+    } else {
+      menu.addItem((item) =>
+        item.setTitle("Delete history").setIcon("trash-2").onClick(async () => {
+          await this.host.deleteShareHistory(share);
+          await this.refreshShares();
+        })
+      );
+    }
+    showMenuBelowButton(menu, button);
+  }
+
+  private showFolderShareMenu(button: HTMLElement, folderShare: FolderShareResponse): void {
+    const menu = new Menu();
+    if (folderShare.status !== "stopped" && folderShare.status !== "expired") {
+      menu.addItem((item) =>
+        item.setTitle("Stop sharing").setIcon("unlink").onClick(async () => {
+          await this.host.stopFolderShareFromList(folderShare);
+          await this.refreshShares();
+        })
+      );
+    } else {
+      menu.addItem((item) =>
+        item.setTitle("Delete history").setIcon("trash-2").onClick(async () => {
+          await this.host.deleteFolderShareHistory(folderShare);
+          await this.refreshShares();
+        })
+      );
+    }
+    showMenuBelowButton(menu, button);
+  }
+
+  private showAccountMenu(button: HTMLElement): void {
+    const menu = new Menu();
+    menu.addItem((item) => item.setTitle("Manage plan").setIcon("credit-card").onClick(() => void this.host.openMembershipCenter()));
+    menu.addItem((item) => item.setTitle("Switch account").setIcon("log-in").onClick(() => void this.host.reconnectAccount()));
+    menu.addItem((item) => item.setTitle("Support").setIcon("life-buoy").onClick(() => void this.host.requestAccessUpgrade("plugin_dashboard")));
+    menu.addItem((item) => item.setTitle("Plugin preferences").setIcon("settings").onClick(() => this.host.openSettingsTab()));
+    menu.addSeparator();
+    menu.addItem((item) => item.setTitle("Disconnect").setIcon("log-out").onClick(async () => {
+      await this.host.disconnectAccount();
+      this.resetShares();
+      this.render();
+    }));
+    showMenuBelowButton(menu, button);
+  }
+
+  private shouldPrepareDetailedNote(value: string): boolean {
+    const membership = this.host.docferrySettings.membership;
+    if (!membership?.hasMediaNoteEntitlement || !membership.canUseMediaNote) return false;
+    try {
+      const provider = externalLinkProvider(validatedExternalImportUrl(value));
+      return shouldPrepareDetailedNote(membership.hasMediaNoteEntitlement, provider, {
+        enabled: membership.canUseMediaNote,
+        supportedProviders: membership.mediaNoteProviders
+      });
+    } catch {
+      return false;
+    }
   }
 
   private renderShareSkeleton(containerEl: HTMLElement): void {
-    const list = containerEl.createDiv({ cls: "docferry-share-list docferry-workspace-share-list" });
+    const list = containerEl.createDiv({
+      cls: "docferry-share-list docferry-workspace-share-list",
+      attr: { "aria-busy": "true", "aria-label": "Loading shares" }
+    });
     for (let index = 0; index < 4; index += 1) {
-      const row = list.createDiv({ cls: "docferry-share-row docferry-workspace-share-row is-loading" });
+      const row = list.createDiv({
+        cls: "docferry-share-row docferry-workspace-share-row docferry-share-row--compact is-loading"
+      });
       const main = row.createDiv({ cls: "docferry-share-main" });
       main.createDiv({ cls: "docferry-skeleton-line is-title" });
       main.createDiv({ cls: "docferry-skeleton-line" });
     }
   }
 
-  private renderEmpty(containerEl: HTMLElement, title: string, message: string, isError = false): void {
+  private renderEmpty(
+    containerEl: HTMLElement,
+    title: string,
+    message: string,
+    isError = false,
+    action?: { label: string; icon: string; action: () => void }
+  ): void {
     const empty = containerEl.createDiv({ cls: `docferry-settings-empty ${isError ? "is-error" : ""}` });
-    empty.createDiv({ text: title, cls: "docferry-heading docferry-heading-4" });
+    empty.createEl("h3", { text: title, cls: "docferry-heading docferry-heading-4" });
     empty.createEl("p", { text: message });
+    if (action) {
+      const button = empty.createEl("button", { cls: "mod-cta", attr: { type: "button" } });
+      appendButtonLabel(button, action.icon, action.label);
+      button.addEventListener("click", action.action);
+    }
   }
 }
 
@@ -543,10 +1036,30 @@ function appendButtonLabel(button: HTMLButtonElement, icon: string, text: string
   button.createSpan({ text, cls: "docferry-button-label" });
 }
 
+function appendIconOnly(button: HTMLElement, iconName: string): void {
+  button.createSpan({
+    cls: "docferry-icon-button-glyph",
+    attr: { "aria-hidden": "true", "data-docferry-icon": iconName }
+  });
+}
+
+function formatCalendarDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "next month";
+  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
 function addAsyncClickListener(button: HTMLElement, handler: () => Promise<void>): void {
   button.addEventListener("click", () => {
-    void handler();
+    void handler().catch(() => {
+      new Notice("That action could not be completed. Check your connection and try again.");
+    });
   });
+}
+
+function showMenuBelowButton(menu: Menu, button: HTMLElement): void {
+  const bounds = button.getBoundingClientRect();
+  menu.setUseNativeMenu(false).showAtPosition({ x: bounds.right, y: bounds.bottom, left: true });
 }
 
 function renderMembershipStat(containerEl: HTMLElement, label: string, value: string): void {
@@ -555,11 +1068,10 @@ function renderMembershipStat(containerEl: HTMLElement, label: string, value: st
   item.createEl("strong", { text: value });
 }
 
-function isValidShareUrl(value: string): boolean {
+function isValidWebUrl(value: string): boolean {
   try {
     const parsed = new URL(value.trim());
-    const parts = parsed.pathname.split("/").filter(Boolean);
-    return parsed.protocol.startsWith("http") && Boolean(parsed.host) && parts.length >= 2 && parts[0] === "s";
+    return ["http:", "https:"].includes(parsed.protocol) && Boolean(parsed.host) && !parsed.username && !parsed.password;
   } catch {
     return false;
   }
@@ -569,4 +1081,26 @@ function formatError(error: unknown, fallback: string): string {
   if (error instanceof ShareApiError) return `${fallback}: ${error.message}`;
   if (error instanceof Error) return `${fallback}: ${error.message}`;
   return fallback;
+}
+
+function friendlyImportError(error: unknown): string {
+  if (error instanceof ShareApiError) {
+    if (error.status === 404) return "This shared note could not be found.";
+    if (error.status === 410) return "This share is no longer available.";
+    if (error.status === 401) return "The password was not accepted. Try again.";
+  }
+  if (error instanceof TypeError || (error instanceof Error && /network|fetch|connect/i.test(error.message))) {
+    return "DocFerry could not connect. Check your internet connection and try again.";
+  }
+  return "Import failed. Check the link and try again.";
+}
+
+function friendlyShareListError(error: unknown): string {
+  if (error instanceof ShareApiError && error.status === 401) {
+    return "Reconnect your Bondie account, then refresh.";
+  }
+  if (error instanceof TypeError || (error instanceof Error && /network|fetch|connect/i.test(error.message))) {
+    return "DocFerry could not connect. Check your internet connection and refresh.";
+  }
+  return "Refresh to try loading your shares again.";
 }

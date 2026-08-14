@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.0.66
+
+- Replace the retired free-service client with the complete Bondie-powered
+  DocFerry product while preserving the Community plugin ID `docferry`.
+- Add system-browser Bondie sign-in, the DocFerry Dashboard, membership and
+  billing entry points, and explicit Free/Pro usage presentation.
+- Unify DocFerry Share, ordinary web link, article, video, and audio saving in
+  one novice-facing **Save to Obsidian** entry point.
+- Add Pro Folder Share, semantic theme styling, and background Advanced Import
+  with preview, cancellation, restart recovery, and the verified allowance of
+  30 accepted jobs per calendar month.
+- Restore complete note and folder Share management: copy, open, update,
+  password, expiration, stop, and inactive-history deletion.
+- Use one responsive reader shell for handwritten notes, generated media notes,
+  and folders, including corrected mobile spacing and clean reader headers.
+- Make the service transition one-way: former sessions are cleared, and Share
+  metadata from another origin is never submitted to Bondie as an update.
+- Publish current privacy, security, support, migration, and Optional payments
+  disclosures with reproducible source and attested release artifacts.
+
 ## 0.0.40
 
 - Fix the public free plugin membership refresh parser so free service responses

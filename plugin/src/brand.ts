@@ -1,7 +1,7 @@
 import logo128Base64 from "../logo-128.base64";
 
 export const DOCFERRY_PRODUCT_NAME = "DocFerry";
-export const DOCFERRY_PRODUCT_DESCRIPTION = "Secure single-note sharing for Obsidian.";
+export const DOCFERRY_PRODUCT_DESCRIPTION = "Save links and share notes or folders.";
 export const DOCFERRY_LOGO_128_DATA_URI = `data:image/png;base64,${logo128Base64.trim()}`;
 
 export function appendDocferryLogo(containerEl: HTMLElement, className = "docferry-plugin-logo"): HTMLElement {
@@ -22,7 +22,7 @@ export function renderDocferryHeader(containerEl: HTMLElement, title: string, de
   appendDocferryLogo(header, "docferry-plugin-logo").setAttr("aria-hidden", "true");
 
   const copy = header.createDiv({ cls: "docferry-plugin-header-copy" });
-  copy.createDiv({ text: title, cls: "docferry-heading docferry-heading-2" });
+  copy.createEl("h2", { text: title, cls: "docferry-heading docferry-heading-2" });
   if (description) {
     copy.createEl("p", { text: description });
   }

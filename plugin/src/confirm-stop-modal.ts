@@ -3,15 +3,43 @@ import { renderDocferryHeader } from "./brand";
 
 export function confirmStopShare(app: App, title: string, sourcePath?: string | null): Promise<boolean> {
   return new Promise((resolve) => {
-    new ConfirmStopShareModal(app, title, sourcePath || "", resolve).open();
+    new ConfirmShareActionModal(
+      app,
+      "Stop sharing?",
+      "The public DocFerry link will stop opening this content.",
+      "Keep share",
+      "Stop sharing",
+      title,
+      sourcePath || "",
+      resolve
+    ).open();
   });
 }
 
-class ConfirmStopShareModal extends Modal {
+export function confirmDeleteShareHistory(app: App, title: string, sourcePath?: string | null): Promise<boolean> {
+  return new Promise((resolve) => {
+    new ConfirmShareActionModal(
+      app,
+      "Delete share history?",
+      "This removes the stopped record from DocFerry. The source file in your vault is not deleted.",
+      "Keep history",
+      "Delete history",
+      title,
+      sourcePath || "",
+      resolve
+    ).open();
+  });
+}
+
+class ConfirmShareActionModal extends Modal {
   private done = false;
 
   constructor(
     app: App,
+    private readonly heading: string,
+    private readonly description: string,
+    private readonly cancelLabel: string,
+    private readonly confirmLabel: string,
     private readonly title: string,
     private readonly sourcePath: string,
     private readonly resolve: (confirmed: boolean) => void
@@ -22,7 +50,7 @@ class ConfirmStopShareModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
-    renderDocferryHeader(contentEl, "Stop sharing?", "The public DocFerry link will stop opening this note.");
+    renderDocferryHeader(contentEl, this.heading, this.description);
     contentEl.createEl("p", {
       text: this.title,
       cls: "setting-item-description"
@@ -35,10 +63,10 @@ class ConfirmStopShareModal extends Modal {
     }
 
     const buttons = contentEl.createDiv({ cls: "modal-button-container" });
-    buttons.createEl("button", { text: "Keep share" }).addEventListener("click", () => {
+    buttons.createEl("button", { text: this.cancelLabel }).addEventListener("click", () => {
       this.finish(false);
     });
-    buttons.createEl("button", { text: "Stop sharing", cls: "mod-warning" }).addEventListener("click", () => {
+    buttons.createEl("button", { text: this.confirmLabel, cls: "mod-warning" }).addEventListener("click", () => {
       this.finish(true);
     });
   }

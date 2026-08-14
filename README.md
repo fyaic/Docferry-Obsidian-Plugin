@@ -1,107 +1,123 @@
 <p align="center">
-  <img src="plugin/docferry-logo-256.png" alt="DocFerry logo" width="156">
+  <img src="plugin/docferry-logo-256.png" alt="DocFerry logo" width="132">
 </p>
 
 <h1 align="center">DocFerry</h1>
 
 <p align="center">
-  Share one Markdown note as one secure DocFerry URL, then update or revoke that same link whenever the note changes.
+  Save useful links as Markdown and share selected notes or folders without
+  turning your vault into a website.
 </p>
 
-DocFerry is built for focused single-note sharing. It does not publish an entire folder, vault, digital garden, or public directory. The product boundary is simple:
+DocFerry is a desktop plugin backed by the hosted DocFerry service. Install it,
+sign in with a Bondie account in your system browser, and work from one simple
+home page. No server deployment, model key, or provider configuration is
+required.
 
-```text
-one selected note -> one secure share URL
-```
+> **Major update:** `0.0.66` replaces the former free-service release with the
+> full Bondie-powered product while keeping the existing Community plugin ID
+> `docferry`. Existing users should read the
+> [migration guide](docs/MIGRATION-FROM-FREE.md) and sign in again after the
+> update.
 
-Referenced images and attachments can be shared together with the note in the same publish action. You do not need to upload each attachment separately, which makes DocFerry convenient for single-note handoffs when a full Obsidian Publish site would be too broad.
+## Save to your vault
 
-Live preview: [DocFerry Feature Overview](https://docferry.fuyonder.tech/s/Gt5Wy3pwzY)
+Paste one public link on the DocFerry home page. DocFerry chooses the useful
+path without asking you to understand implementation modes:
 
-## Share A Note
+- a DocFerry Share is imported with its explicitly listed attachments;
+- an ordinary public URL becomes a local Markdown link note;
+- an enabled web, video, or audio source can become a detailed Pro note after
+  background processing and preview.
 
-Right-click a Markdown note and choose `Share thru Docferry`.
+Generated notes are reviewed before they are written. Advanced Import supports
+the source lanes advertised by the current service, including enabled article,
+YouTube, Bilibili, TikTok, Douyin, direct-video, and direct-audio sources.
+Third-party source availability can change, so unsupported work fails without
+silently saving a fabricated result.
 
-<p align="center">
-  <img src="docs/screenshots/context-menu-share.png" alt="Obsidian right-click menu showing Share thru Docferry" width="360">
-</p>
+## Share selected content
 
-DocFerry opens a publish dialog for the selected note. You can confirm or edit the title, optionally add a password, and choose whether the link never expires or expires after 30 days.
+Publish a Markdown note from its file menu or the command palette. You can:
 
-<p align="center">
-  <img src="docs/screenshots/share-options-modal.png" alt="DocFerry publish dialog with password protection and expiration options" width="720">
-</p>
+- keep one stable Share URL while updating the note;
+- set or remove a password;
+- choose an expiration;
+- copy, open, update, stop, and delete inactive history;
+- include explicitly referenced local images and attachments;
+- inspect linked-note availability without publishing linked notes.
 
-After publishing, the share URL is copied for you.
+Pro users can also publish a selected folder of Markdown documents. Folder
+Share is bounded, atomic, excludes hidden content, and has its own navigation
+and lifecycle controls.
 
-## Reader Experience
+Pro theme styling carries reviewed colors, borders, callouts, radius, and code
+styling into DocFerry's responsive reader. It does not upload or reproduce an
+arbitrary theme layout stylesheet.
 
-The shared page is a calm read-only page that keeps everyday note structure close to the source note. Callouts, Mermaid diagrams, tables, and image attachments are rendered in the reader view, with wide content adapting to the available page width.
+## Free and Pro
 
-<p align="center">
-  <img src="docs/screenshots/published-reader-page.png" alt="DocFerry reader page showing a callout, Mermaid diagram, table, and image attachments" width="760">
-</p>
+DocFerry is free to install and its core workflows remain available without a
+subscription. A Pro subscription is optional and unlocks higher limits and
+advanced hosted processing.
 
-DocFerry shares the current note and explicitly referenced local assets. Linked notes are not uploaded unless you publish them separately.
+| Capability | Free | Pro |
+| --- | ---: | ---: |
+| Save a public URL as a local link note | Yes | Yes |
+| Import a DocFerry Share | Yes | Yes |
+| Publish and manage a single Markdown Share | Yes | Yes |
+| Active note Shares | 5 | 20 |
+| Maximum single shared file | 2 MiB | 10 MiB |
+| Folder Share | No | 5 active |
+| Documents per Folder Share | No | Up to 100 |
+| Total Folder Share content | No | Up to 50 MiB |
+| Theme styling | No | Yes |
+| Advanced Import | No | 30 accepted jobs per calendar month |
+| Simultaneous Advanced Imports | No | 1 |
 
-## Update Or Revoke
+Monthly and yearly Pro subscriptions provide the same product benefits. Plans,
+billing, receipts, and support open in the DocFerry Dashboard. Personal profile,
+security, devices, and privacy remain in the separate Bondie Account Center.
 
-When a note has already been published, its right-click menu changes. You can update the content behind the same link, copy the existing link, inspect linked-note status, or stop sharing.
+For Obsidian Community classification this plugin uses **Optional payments**:
+Free is usable for the core product, while Pro optionally unlocks additional
+features and higher limits.
 
-<p align="center">
-  <img src="docs/screenshots/context-menu-manage-share.png" alt="Obsidian right-click menu for an already published DocFerry note" width="360">
-</p>
+## First use
 
-- `Update share link` refreshes the published content without creating a new URL.
-- `Copy share link` copies the current reader URL.
-- `Show linked note status` shows which internal note links are available to readers.
-- `Stop sharing` revokes the link. After revocation, the URL no longer serves the note.
+1. Install and enable DocFerry from Community Plugins.
+2. Open DocFerry from the ribbon.
+3. Select **Sign in**. Authentication opens in the operating system's default
+   browser and completes back in the plugin.
+4. Paste a link on the home page, or publish a selected Markdown note from the
+   file menu.
+5. Open **Shares** to manage active and past note or folder Shares.
 
-## Manage Shares
+Preferences are organized into Account, Sharing, Imports, and Advanced pages.
+The Sharing page includes a direct path to published content for users who do
+not use the ribbon regularly.
 
-Open the plugin settings to manage published links from the `Shares` section. The list shows published documents for the connected account, including their source path, update time, expiration state, password state, and actions such as copy, open, update, and stop sharing.
+## Privacy and trust
 
-<p align="center">
-  <img src="docs/screenshots/settings-shares-management.png" alt="DocFerry settings page showing the Shares management section" width="760">
-</p>
+DocFerry does not scan or upload your vault automatically. Network actions occur
+when you sign in, publish selected content, import a Share, or explicitly submit
+a supported public URL for Advanced Import.
 
-## Import A DocFerry Link
+Read [PRIVACY.md](PRIVACY.md) before publishing sensitive content. It explains
+the exact data flows, OpenRouter processing boundary, local state, encryption,
+retention, deletion, clipboard behavior, and payment boundary.
 
-After installing and enabling the plugin, use the DocFerry ribbon icon to open the DocFerry view. Paste a DocFerry URL and click `Import`; the note is saved into this vault as a local Markdown file. If the share is password-protected, the password prompt appears when needed.
+- Hosted service: `https://docferry.bondie.io`
+- Privacy: `https://docferry.bondie.io/privacy`
+- Terms: `https://docferry.bondie.io/terms`
+- Support: `https://docferry.bondie.io/dashboard/support`
+- Security reports: [SECURITY.md](SECURITY.md)
 
-<p align="center">
-  <img src="docs/screenshots/import-docferry-link.png" alt="DocFerry ribbon view for importing a shared link into the current vault" width="760">
-</p>
+## Manual installation
 
-Import reads one DocFerry share URL at a time. It does not scan the sender's vault, crawl unrelated folders, or import unpublished linked notes.
-
-## Account And Quota
-
-- Hosted service: `https://docferry.fuyonder.tech`
-- Account system: Fuyonder account
-- Free quota: connected accounts receive a free 5-document quota from the hosted service
-- More quota: users can request extra free quota from the beta list flow in settings
-- Billing: public billing controls are not active in the plugin UI
-- Legal pages: hosted service provides `https://docferry.fuyonder.tech/privacy` and `https://docferry.fuyonder.tech/terms`
-- Versioning: the GitHub release tag, root `manifest.json`, and `plugin/manifest.json` must match
-
-If paid access or hosted-service billing is enabled later, update the README, privacy notice, release notes, product UI copy, and review evidence in the same release.
-
-## Privacy Boundary
-
-DocFerry does not upload your vault automatically. When a user publishes, DocFerry can upload the selected note, rendered HTML snapshot, bounded CSS snapshot, explicitly referenced local assets, and share metadata needed to serve the link.
-
-Read [PRIVACY.md](PRIVACY.md) before publishing sensitive notes.
-
-## Manual Install
-
-Use the latest GitHub Release and copy the plugin files into:
-
-```text
-.obsidian/plugins/docferry/
-```
-
-Required runtime files:
+Most users should install from Community Plugins. For a controlled manual
+installation, download these three separate assets from the matching GitHub
+Release and place them in `.obsidian/plugins/docferry/`:
 
 ```text
 manifest.json
@@ -109,32 +125,25 @@ main.js
 styles.css
 ```
 
-GitHub releases should attach only the assets that Obsidian downloads: `manifest.json`, `main.js`, and `styles.css`.
+The release tag must exactly match the manifest version, without a `v` prefix.
 
-## Build
-
-From a clean checkout:
+## Build and review
 
 ```bash
 npm ci
 npm --prefix plugin ci
-npm run check:plugin
+npm run check:release
 ```
 
-Plugin-only build:
+`check:release` runs the official-style ESLint rules, 70 client tests, a clean
+TypeScript bundle, `node --check`, metadata and license checks, domain-boundary
+checks, and a public-source scan. The release workflow rebuilds from source and
+attests `main.js`, `manifest.json`, and `styles.css` before publishing.
 
-```bash
-cd plugin
-npm ci
-npm run build
-node --check main.js
-```
+The hosted backend, provider configuration, billing infrastructure, operator
+tools, and production secrets are intentionally not part of this public client
+repository.
 
-## Release Review Notes
+## License
 
-- `manifest.json` is mirrored at the repository root for Obsidian review.
-- `plugin/manifest.json` is the runtime manifest included in the installable plugin package.
-- `package.json` and `tsconfig.json` at the repository root exist so automated review tools can resolve Obsidian, CodeMirror, and runtime SDK types in this plugin-subdirectory layout.
-- The plugin is desktop-only because this release targets desktop Obsidian plugin packaging.
-- The manifest description intentionally avoids the word "Obsidian"; the Community directory already provides that context.
-- The GitHub release tag, root `manifest.json`, and `plugin/manifest.json` must match.
+The public DocFerry plugin client is released under the [MIT License](LICENSE).

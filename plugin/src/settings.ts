@@ -1,11 +1,11 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting, setIcon } from "obsidian";
-import { DOCFERRY_PRODUCT_DESCRIPTION, DOCFERRY_PRODUCT_NAME, appendDocferryLogo, renderDocferryHeader } from "./brand";
-import type { BillingPlan, DisplayUser, ShareListItemResponse } from "./types";
-
-export type AuthMode = "manual-token" | "company-sso";
-export type ImageUploadQuality = "original" | "high" | "standard";
-export const MANUAL_TOKEN_ENTRY_ENABLED = false;
-export const DOCFERRY_PRODUCTION_SERVICE_URL = "https://docferry.fuyonder.tech";
+import { DOCFERRY_PRODUCT_DESCRIPTION, DOCFERRY_PRODUCT_NAME, renderDocferryHeader } from "./brand";
+import { canUseMediaNote } from "./media-note-availability";
+import type {
+  DisplayUser,
+  MembershipResponse,
+  ShareListItemResponse
+} from "./types";
 
 export interface ConnectedAccount {
   productSubjectId: string;
@@ -17,13 +17,29 @@ export interface ConnectedAccount {
 
 export interface MembershipSnapshot {
   productKey: string;
+  accessRole: "member";
   planKey: string;
   planDisplayName: string;
   entitlementKey?: string | null;
   activeShareCount: number;
-  activeShareLimit: number;
+  activeShareLimit: number | null;
+  activeFolderShareCount: number;
+  activeFolderShareLimit: number | null;
+  maxFolderDocumentCount: number;
+  maxFolderTotalBytes: number;
   maxSingleFileSizeBytes: number;
   canCreateShare: boolean;
+  canCreateFolderShare: boolean;
+  canUseFullTheme: boolean;
+  hasMediaNoteEntitlement: boolean;
+  canUseMediaNote: boolean;
+  mediaNoteProviders: string[];
+  mediaNoteSourceKinds: string[];
+  mediaNoteActiveJobs: number;
+  mediaNoteActiveJobLimit: number | null;
+  mediaNoteMonthlyJobsUsed: number;
+  mediaNoteMonthlyJobLimit: number | null;
+  mediaNoteResetsAt: string;
   source: string;
   cacheStatus: string;
   refreshedAt: string;
@@ -39,94 +55,83 @@ export interface MembershipSnapshot {
   }>;
 }
 
+export interface PendingMediaNoteImport {
+  jobId: string;
+  ownerProductSubjectId: string;
+  sourceUrl: string;
+  createdAt: string;
+  targetPath?: string;
+}
+
 export interface DocferrySettings {
   serverUrl: string;
-  manualApiToken: string;
   sessionToken: string;
   connectedAccount: ConnectedAccount | null;
   membership: MembershipSnapshot | null;
+  pendingMediaNoteImport: PendingMediaNoteImport | null;
+  pendingAuthState: string;
+  pendingAuthStartedAt: string;
   clientInstanceId: string;
-  /** @deprecated migrated to manualApiToken/sessionToken */
-  apiToken: string;
-  authMode: AuthMode;
   defaultPasswordEnabled: boolean;
   defaultExpiresInDays: string;
   defaultImportFolder: string;
-  imageUploadQuality: ImageUploadQuality;
   uploadConsentAcceptedAt: string;
   uploadConsentNoticeId: string;
   debug: boolean;
 }
 
 export const DEFAULT_SETTINGS: DocferrySettings = {
-  serverUrl: DOCFERRY_PRODUCTION_SERVICE_URL,
-  manualApiToken: "",
+  serverUrl: "https://docferry.bondie.io",
   sessionToken: "",
   connectedAccount: null,
   membership: null,
+  pendingMediaNoteImport: null,
+  pendingAuthState: "",
+  pendingAuthStartedAt: "",
   clientInstanceId: "",
-  apiToken: "",
-  authMode: "company-sso",
   defaultPasswordEnabled: false,
   defaultExpiresInDays: "never",
   defaultImportFolder: "Docferry Imports",
-  imageUploadQuality: "original",
   uploadConsentAcceptedAt: "",
   uploadConsentNoticeId: "",
   debug: false
 };
 
-export function shouldResetToProductionServiceUrl(settings: DocferrySettings): boolean {
-  return settings.serverUrl.replace(/\/+$/, "") !== DOCFERRY_PRODUCTION_SERVICE_URL;
-}
-
-export function resetToProductionServiceUrl(settings: DocferrySettings): void {
-  settings.serverUrl = DOCFERRY_PRODUCTION_SERVICE_URL;
-  settings.authMode = "company-sso";
-  settings.sessionToken = "";
-  settings.manualApiToken = "";
-  settings.apiToken = "";
-  settings.connectedAccount = null;
-  settings.membership = null;
-}
-
 export interface SettingsHost {
-  settings: DocferrySettings;
+  docferrySettings: DocferrySettings;
   saveSettings(): Promise<void>;
   testConnection(): Promise<void>;
   startLogin(): Promise<void>;
+  startSignup(): Promise<void>;
   disconnectAccount(): Promise<void>;
   refreshMembership(force?: boolean): Promise<void>;
   openMembershipCenter(): Promise<void>;
-  requestAccessUpgrade(source: "plugin_settings" | "plugin_dashboard"): Promise<void>;
-  listShares(): Promise<ShareListItemResponse[]>;
-  updateShareFromList(share: ShareListItemResponse): Promise<void>;
-  stopShareFromList(share: ShareListItemResponse): Promise<void>;
-  importShareUrl(initialUrl?: unknown): Promise<void>;
+  openDashboardHome(): Promise<void>;
+  openSharesPage(): Promise<void>;
 }
 
-type SettingsSection = "account" | "shares" | "import" | "config";
+type SettingsPage = "account" | "sharing" | "imports" | "advanced";
 
-const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; icon: string }> = [
-  { id: "account", label: "Account", icon: "user" },
-  { id: "shares", label: "Shares", icon: "files" },
-  { id: "import", label: "Import", icon: "download" },
-  { id: "config", label: "Settings", icon: "settings" }
+const SETTINGS_PAGES: Array<{
+  id: SettingsPage;
+  label: string;
+  icon: string;
+}> = [
+  { id: "account", label: "Account", icon: "user-round" },
+  { id: "sharing", label: "Sharing", icon: "share-2" },
+  { id: "imports", label: "Imports", icon: "folder-down" },
+  { id: "advanced", label: "Advanced", icon: "wrench" }
 ];
 
 export class DocferrySettingTab extends PluginSettingTab {
-  private activeSection: SettingsSection = "account";
-  private shareError = "";
-  private shareListLoaded = false;
-  private shareListLoading = false;
-  private shareListKey = "";
-  private shares: ShareListItemResponse[] = [];
+  private activePage: SettingsPage = "account";
 
   constructor(app: App, private readonly host: SettingsHost & Plugin) {
     super(app, host);
   }
 
   display(): void {
+    this.activePage = "account";
     this.render();
   }
 
@@ -140,470 +145,166 @@ export class DocferrySettingTab extends PluginSettingTab {
     const layout = containerEl.createDiv({ cls: "docferry-settings-layout" });
     this.renderNavigation(layout);
     const body = layout.createDiv({ cls: "docferry-settings-body" });
-    if (this.activeSection === "account") this.renderAccountSection(body);
-    if (this.activeSection === "shares") this.renderSharesSection(body);
-    if (this.activeSection === "import") this.renderImportSection(body);
-    if (this.activeSection === "config") this.renderConfigSection(body);
+    if (this.activePage === "account") this.renderConnectionSection(body);
+    if (this.activePage === "sharing") this.renderSharingSection(body);
+    if (this.activePage === "imports") this.renderImportsSection(body);
+    if (this.activePage === "advanced") this.renderAdvancedSection(body);
   }
 
   refreshForAuthChange(): void {
-    this.activeSection = "account";
-    this.resetShareList();
     this.render();
-  }
-
-  refreshForShareChange(): void {
-    this.resetShareList();
-    if (this.activeSection === "shares") this.render();
   }
 
   private renderNavigation(containerEl: HTMLElement): void {
-    const nav = containerEl.createDiv({ cls: "docferry-settings-nav", attr: { role: "tablist" } });
-    for (const section of SETTINGS_SECTIONS) {
-      const button = nav.createEl("button", {
-        cls: "docferry-settings-nav-button",
+    const navigation = containerEl.createDiv({
+      cls: "docferry-settings-nav",
+      attr: { role: "navigation", "aria-label": "DocFerry settings" }
+    });
+    for (const page of SETTINGS_PAGES) {
+      const button = navigation.createEl("button", {
+        cls: `docferry-settings-nav-button ${page.id === this.activePage ? "is-active" : ""}`,
         attr: {
           type: "button",
-          role: "tab",
-          "aria-selected": String(this.activeSection === section.id)
+          "aria-current": page.id === this.activePage ? "page" : "false"
         }
       });
       const icon = button.createSpan({ cls: "docferry-settings-nav-icon", attr: { "aria-hidden": "true" } });
-      setIcon(icon, section.icon);
-      button.createSpan({ text: section.label, cls: "docferry-settings-nav-label" });
-      if (this.activeSection === section.id) button.addClass("is-active");
+      setIcon(icon, page.icon);
+      button.createSpan({ text: page.label, cls: "docferry-settings-nav-label" });
       button.addEventListener("click", () => {
-        this.activeSection = section.id;
+        this.activePage = page.id;
         this.render();
       });
     }
   }
 
-  private renderAccountSection(containerEl: HTMLElement): void {
-    const account = this.host.settings.connectedAccount;
+  private renderPageIntro(containerEl: HTMLElement, title: string, description: string): void {
+    const intro = containerEl.createDiv({ cls: "docferry-settings-page-intro" });
+    intro.createDiv({
+      text: title,
+      cls: "docferry-heading docferry-heading-2",
+      attr: { role: "heading", "aria-level": "2" }
+    });
+    intro.createEl("p", { text: description });
+  }
+
+  private renderConnectionSection(containerEl: HTMLElement): void {
+    const account = this.host.docferrySettings.connectedAccount;
+    const connected = Boolean(this.host.docferrySettings.sessionToken);
     const displayName = account?.displayUser?.name || account?.displayUser?.email || "Not connected";
-    const panel = containerEl.createDiv({ cls: "docferry-settings-panel docferry-account-panel" });
+    this.renderPageIntro(containerEl, "Account", "Your DocFerry membership and this connected device.");
+    const panel = containerEl.createDiv({ cls: "docferry-settings-panel docferry-connection-panel" });
     const header = panel.createDiv({ cls: "docferry-panel-header" });
     const copy = header.createDiv();
-    copy.createDiv({ text: "Account", cls: "docferry-heading docferry-heading-3" });
+    copy.createDiv({
+      text: "Bondie account",
+      cls: "docferry-heading docferry-heading-3",
+      attr: { role: "heading", "aria-level": "3" }
+    });
     copy.createEl("p", {
-      text: account ? "Fuyonder account is connected." : "Log in or sign up with your Fuyonder account."
+      text: connected
+        ? "This Obsidian device is connected to DocFerry. Membership and personal details live on the web dashboard."
+        : "Connect once to publish, save links, and use your DocFerry membership."
     });
 
     const status = header.createDiv({
-      text: account ? "Connected" : "Not connected",
-      cls: account ? "docferry-status-badge is-ok" : "docferry-status-badge"
+      text: connected ? "Connected" : "Not connected",
+      cls: connected ? "docferry-status-badge is-ok" : "docferry-status-badge"
     });
 
-    const card = panel.createDiv({ cls: "docferry-account-card" });
+    const card = panel.createDiv({ cls: "docferry-settings-account-identity" });
     renderAccountAvatar(card, account?.displayUser, "docferry-account-avatar");
     const details = card.createDiv({ cls: "docferry-account-details" });
-    details.createDiv({ text: displayName, cls: "docferry-heading docferry-heading-4" });
+    details.createDiv({
+      text: displayName,
+      cls: "docferry-heading docferry-heading-4",
+      attr: { role: "heading", "aria-level": "4" }
+    });
     if (account?.displayUser?.email && account.displayUser.email !== displayName) {
       details.createEl("p", { text: account.displayUser.email });
     }
-    if (account?.connectedAt) {
-      details.createEl("p", { text: `Connected ${formatDateTime(account.connectedAt)}` });
-    }
-    if (!account) {
-      details.createEl("p", { text: "Use Log in / Sign up to start account login." });
-    }
+    details.createEl("p", { text: connected ? "Signed in with Bondie" : "Use an existing account or create a new one." });
 
-    const actions = panel.createDiv({ cls: "docferry-settings-actions" });
-    if (this.host.settings.authMode === "company-sso") {
-      const connectButton = actions.createEl("button", {
-        text: account ? "Refresh account" : "Log in / Sign up",
-        cls: "mod-cta",
-        attr: { type: "button" }
-      });
-      addAsyncClickListener(connectButton, async () => {
-        if (account) {
-          await this.host.refreshMembership(true);
-          this.render();
-        } else {
-          await this.host.startLogin();
-        }
-      });
-    }
-    const testButton = actions.createEl("button", { text: "Test connection", attr: { type: "button" } });
-    addAsyncClickListener(testButton, async () => {
-      await this.host.testConnection();
-      this.render();
-    });
-    if (this.host.settings.authMode === "company-sso") {
-      const disconnectButton = actions.createEl("button", { text: "Disconnect", attr: { type: "button" } });
-      disconnectButton.disabled = !account && !this.host.settings.sessionToken;
-      addAsyncClickListener(disconnectButton, async () => {
-        await this.host.disconnectAccount();
-        this.resetShareList();
-        this.render();
-      });
-    }
-    this.renderLogoNote(
-      panel,
-      "Log in is used to record which account starts each file share, manage storage quota, and protect files with account-based access.",
-      "docferry-account-login-note"
-    );
-    this.renderMembershipCard(panel);
-    this.renderAccessRequestPanel(panel);
-    status.setAttr("aria-label", account ? "Connected" : "Current account status");
-  }
-
-  private renderMembershipCard(containerEl: HTMLElement): void {
-    const membership = this.host.settings.membership;
-    const connected = this.host.settings.authMode === "company-sso" && Boolean(this.host.settings.sessionToken);
-    const card = containerEl.createDiv({ cls: "docferry-membership-card" });
-    const header = card.createDiv({ cls: "docferry-membership-header" });
-    const copy = header.createDiv();
-    copy.createDiv({ text: "Access limits", cls: "docferry-heading docferry-heading-4" });
-    copy.createEl("p", {
-      text: membership
-        ? `${membershipAccessLabel(membership)} limits refreshed ${formatDateTime(membership.refreshedAt)}.`
-        : connected
-          ? "Access limits have not been refreshed."
-          : "Log in / Sign up to use your free 5-document quota."
-    });
-    header.createSpan({
-      text: membership?.planDisplayName || (connected ? "Unknown" : "Not connected"),
-      cls: `docferry-status-badge ${membership && membership.planKey !== "free" ? "is-ok" : ""}`
-    });
-
-    const stats = card.createDiv({ cls: "docferry-membership-stats" });
-    this.renderMembershipStat(stats, "Active shares", membership ? `${membership.activeShareCount}/${membership.activeShareLimit}` : "-");
-    this.renderMembershipStat(stats, "Single file", membership ? formatBytes(membership.maxSingleFileSizeBytes) : "-");
-    this.renderMembershipStat(stats, "Access", membership ? membershipAccessLabel(membership) : "-");
-    if (membership?.unavailableReason) {
-      card.createDiv({ text: membershipUnavailableMessage(membership.unavailableReason), cls: "docferry-membership-note" });
-    }
-
-    if (membership?.billingEnabled) {
-      const center = card.createDiv({ cls: "docferry-membership-center" });
-      const centerCopy = center.createDiv({ cls: "docferry-membership-center-copy" });
-      centerCopy.createDiv({ text: "Quota", cls: "docferry-heading docferry-heading-5" });
-      centerCopy.createEl("p", { text: "Manage quota on the DocFerry web dashboard." });
-      const centerButton = center.createEl("button", {
-        text: "Open quota",
-        cls: "mod-cta",
-        attr: { type: "button" }
-      });
-      centerButton.disabled = !this.host.settings.serverUrl || !connected;
-      addAsyncClickListener(centerButton, async () => {
-        await this.host.openMembershipCenter();
-      });
-    }
-
-  }
-
-  private renderAccessRequestPanel(containerEl: HTMLElement): void {
-    const connected = this.host.settings.authMode === "company-sso" && Boolean(this.host.settings.sessionToken);
-    const panel = containerEl.createDiv({ cls: "docferry-account-request-panel docferry-settings-request-panel" });
-    const copy = panel.createDiv({ cls: "docferry-account-request-copy" });
-    copy.createDiv({ text: "Request more quota", cls: "docferry-heading docferry-heading-4" });
-    copy.createEl("p", {
-      text: connected
-        ? "DocFerry is currently 100% free. We allocate extra free quota to users who join the beta list because we want to build this community with you."
-        : "Log in / Sign up before requesting more quota. DocFerry is currently 100% free, and beta-list users can receive extra free quota."
-    });
-    const requestButton = panel.createEl("button", { text: "Request more quota", cls: "mod-cta", attr: { type: "button" } });
-    requestButton.disabled = !connected;
-    addAsyncClickListener(requestButton, async () => {
-      await this.host.requestAccessUpgrade("plugin_settings");
-      this.render();
-    });
-  }
-
-  private renderMembershipStat(containerEl: HTMLElement, label: string, value: string): void {
-    const item = containerEl.createDiv({ cls: "docferry-membership-stat" });
-    item.createSpan({ text: label });
-    item.createEl("strong", { text: value });
-  }
-
-  private renderLogoNote(containerEl: HTMLElement, text: string, extraClass = ""): void {
-    const note = containerEl.createDiv({ cls: extraClass ? `docferry-logo-note ${extraClass}` : "docferry-logo-note" });
-    appendDocferryLogo(note, "docferry-logo-note-mark").setAttr("aria-hidden", "true");
-    note.createEl("p", { text });
-  }
-
-  private renderSharesSection(containerEl: HTMLElement): void {
-    const currentKey = this.currentShareListKey();
-    if (this.shareListKey && this.shareListKey !== currentKey) this.resetShareList();
-    const renderSecurityNote = (): void => {
-      this.renderLogoNote(
-        containerEl,
-        "Files are encrypted at rest in DocFerry Cloud. We do not use your content for training, ads, or secondary data use.",
-        "docferry-share-security-note"
+    if (connected) {
+      const membership = this.host.docferrySettings.membership;
+      const facts = panel.createDiv({ cls: "docferry-settings-account-grid" });
+      renderSettingsFact(facts, "Plan", membership?.planDisplayName || "Refresh required");
+      renderSettingsFact(
+        facts,
+        "Shares",
+        membership ? membershipUsageLabel(membership.activeShareCount, membership.activeShareLimit) : "-"
       );
-    };
-
-    const panel = containerEl.createDiv({ cls: "docferry-settings-panel" });
-    const header = panel.createDiv({ cls: "docferry-panel-header" });
-    const copy = header.createDiv();
-    copy.createDiv({ text: "Shares", cls: "docferry-heading docferry-heading-3" });
-    copy.createEl("p", { text: `${this.shares.length} loaded from this account across vaults.` });
-    const refreshButton = header.createEl("button", { text: "Refresh", attr: { type: "button" } });
-    refreshButton.disabled = this.shareListLoading;
-    refreshButton.addEventListener("click", () => {
-      void this.refreshShares();
-    });
-
-    if (!this.hasAuthForShares()) {
-      const empty = panel.createDiv({ cls: "docferry-settings-empty" });
-      empty.createDiv({ text: "Not connected", cls: "docferry-heading docferry-heading-4" });
-      empty.createEl("p", { text: "Log in / Sign up with your Fuyonder account." });
-      renderSecurityNote();
-      return;
-    }
-
-    if (!this.shareListLoaded && !this.shareListLoading) {
-      void this.refreshShares();
-    }
-
-    if (this.shareListLoading) {
-      this.renderShareSkeleton(panel);
-      renderSecurityNote();
-      return;
-    }
-
-    if (this.shareError) {
-      const error = panel.createDiv({ cls: "docferry-settings-empty is-error" });
-      error.createDiv({ text: "Share list unavailable", cls: "docferry-heading docferry-heading-4" });
-      error.createEl("p", { text: this.shareError });
-      renderSecurityNote();
-      return;
-    }
-
-    if (!this.shares.length) {
-      const empty = panel.createDiv({ cls: "docferry-settings-empty" });
-      empty.createDiv({ text: "No shares yet", cls: "docferry-heading docferry-heading-4" });
-      empty.createEl("p", { text: "Publish a note from the file menu." });
-      renderSecurityNote();
-      return;
-    }
-
-    const list = panel.createDiv({ cls: "docferry-share-list" });
-    for (const share of this.shares) {
-      const row = list.createDiv({ cls: "docferry-share-row" });
-      const main = row.createDiv({ cls: "docferry-share-main" });
-      main.createDiv({ text: share.title || share.source_path, cls: "docferry-heading docferry-heading-4" });
-      main.createEl("p", { text: share.source_path });
-      const meta = main.createDiv({ cls: "docferry-share-meta" });
-      meta.createSpan({ text: vaultLabel(share) });
-      meta.createSpan({ text: `Updated ${formatDateTime(share.updated_at)}` });
-      meta.createSpan({ text: expiryLabel(share) });
-
-      const badges = row.createDiv({ cls: "docferry-share-badges" });
-      badges.createSpan({ text: statusLabel(share.status), cls: `docferry-pill ${statusClass(share.status)}` });
-      badges.createSpan({
-        text: share.password_enabled ? "Password on" : "No password",
-        cls: `docferry-pill ${share.password_enabled ? "is-locked" : ""}`
-      });
-
-      const actions = row.createDiv({ cls: "docferry-share-actions" });
-      const copyButton = actions.createEl("button", { text: "Copy", attr: { type: "button" } });
-      addAsyncClickListener(copyButton, async () => {
-        await navigator.clipboard.writeText(share.url);
-        new Notice("Share link copied");
-      });
-      const openButton = actions.createEl("button", { text: "Open", attr: { type: "button" } });
-      openButton.addEventListener("click", () => {
-        window.open(share.url);
-      });
-      const updateButton = actions.createEl("button", { text: "Update", attr: { type: "button" } });
-      updateButton.disabled = share.status === "stopped";
-      addAsyncClickListener(updateButton, async () => {
-        await this.host.updateShareFromList(share);
-      });
-      if (share.status === "stopped" || share.status === "expired") {
-        actions.createSpan({ text: statusLabel(share.status), cls: "docferry-action-state" });
-      } else {
-        const stopButton = actions.createEl("button", {
-          cls: "docferry-stop-share-button",
-          attr: { type: "button", "aria-label": `Stop sharing ${share.title || share.source_path}` }
-        });
-        appendButtonLabel(stopButton, "unlink", "Stop sharing");
-        addAsyncClickListener(stopButton, async () => {
-          await this.host.stopShareFromList(share);
-          await this.refreshShares();
-        });
-      }
-    }
-    renderSecurityNote();
-  }
-
-  private renderImportSection(containerEl: HTMLElement): void {
-    let shareUrl = "";
-    const panel = containerEl.createDiv({ cls: "docferry-settings-panel docferry-import-panel" });
-    const header = panel.createDiv({ cls: "docferry-panel-header" });
-    const copy = header.createDiv();
-    copy.createDiv({ text: "Import", cls: "docferry-heading docferry-heading-3" });
-    copy.createEl("p", { text: "Import one DocFerry URL into this vault." });
-
-    const form = panel.createDiv({ cls: "docferry-import-form" });
-    const input = form.createEl("input", {
-      type: "text",
-      placeholder: "https://docferry.fuyonder.tech/s/...",
-      cls: "docferry-import-input"
-    });
-    input.addEventListener("input", () => {
-      shareUrl = input.value.trim();
-    });
-
-    const actions = form.createDiv({ cls: "docferry-import-actions" });
-    const importButton = actions.createEl("button", { text: "Import URL", cls: "mod-cta", attr: { type: "button" } });
-    addAsyncClickListener(importButton, async () => {
-      await this.host.importShareUrl(shareUrl);
-      input.value = "";
-      shareUrl = "";
-    });
-
-    const dialogButton = actions.createEl("button", { text: "Open dialog", attr: { type: "button" } });
-    addAsyncClickListener(dialogButton, async () => {
-      await this.host.importShareUrl();
-    });
-
-    const details = panel.createEl("ul", { cls: "docferry-import-details" });
-    details.createEl("li", { text: `Default folder: ${this.host.settings.defaultImportFolder || DEFAULT_SETTINGS.defaultImportFolder}` });
-    details.createEl("li", { text: "Scope: single shared document" });
-    details.createEl("li", { text: "Assets: explicit references only" });
-  }
-
-  private renderShareSkeleton(containerEl: HTMLElement): void {
-    const list = containerEl.createDiv({ cls: "docferry-share-list" });
-    for (let index = 0; index < 3; index += 1) {
-      const row = list.createDiv({ cls: "docferry-share-row is-loading" });
-      const main = row.createDiv({ cls: "docferry-share-main" });
-      main.createDiv({ cls: "docferry-skeleton-line is-title" });
-      main.createDiv({ cls: "docferry-skeleton-line" });
-    }
-  }
-
-  private async refreshShares(): Promise<void> {
-    this.shareListLoading = true;
-    this.shareError = "";
-    this.shareListKey = this.currentShareListKey();
-    this.render();
-    try {
-      this.shares = await this.host.listShares();
-      this.shareListLoaded = true;
-    } catch (error) {
-      this.shareError = error instanceof Error ? error.message : "Could not load shares.";
-      this.shares = [];
-    } finally {
-      this.shareListLoading = false;
-      this.render();
-    }
-  }
-
-  private resetShareList(): void {
-    this.shareError = "";
-    this.shareListLoaded = false;
-    this.shareListLoading = false;
-    this.shareListKey = "";
-    this.shares = [];
-  }
-
-  private hasAuthForShares(): boolean {
-    if (this.host.settings.authMode === "company-sso") return Boolean(this.host.settings.sessionToken);
-    return Boolean(this.host.settings.manualApiToken || this.host.settings.apiToken);
-  }
-
-  private currentShareListKey(): string {
-    const settings = this.host.settings;
-    const tokenTail =
-      settings.authMode === "company-sso"
-        ? settings.sessionToken.slice(-8)
-        : (settings.manualApiToken || settings.apiToken).slice(-8);
-    const ownerHint =
-      settings.authMode === "company-sso"
-        ? settings.connectedAccount?.productSubjectId || "pending"
-        : "manual";
-    return `${settings.serverUrl}|${settings.authMode}|${ownerHint}|${tokenTail}`;
-  }
-
-  private renderConfigSection(containerEl: HTMLElement): void {
-    const servicePanel = containerEl.createDiv({ cls: "docferry-settings-panel" });
-    const serviceHeader = servicePanel.createDiv({ cls: "docferry-panel-header" });
-    const serviceCopy = serviceHeader.createDiv();
-    serviceCopy.createDiv({ text: "Settings", cls: "docferry-heading docferry-heading-3" });
-    serviceCopy.createEl("p", { text: "Connection, defaults and diagnostics." });
-
-    new Setting(servicePanel)
-      .setName("Server URL")
-      .setDesc("The public free release uses the Fuyonder DocFerry service.")
-      .addText((text) =>
-        text
-          .setPlaceholder("https://docferry.fuyonder.tech")
-          .setValue(this.host.settings.serverUrl)
-          .onChange(async (value) => {
-            const nextValue = value.trim().replace(/\/+$/, "");
-            if (nextValue && nextValue !== DOCFERRY_PRODUCTION_SERVICE_URL) {
-              new Notice("This public free release uses the Fuyonder DocFerry service.");
-            }
-            resetToProductionServiceUrl(this.host.settings);
-            await this.host.saveSettings();
-            this.render();
-          })
+      renderSettingsFact(
+        facts,
+        "Advanced imports",
+        membership
+          ? membershipUsageLabel(membership.mediaNoteMonthlyJobsUsed, membership.mediaNoteMonthlyJobLimit)
+          : "-"
       );
-
-    if (MANUAL_TOKEN_ENTRY_ENABLED) {
-      new Setting(servicePanel)
-        .setName("Auth mode")
-        .setDesc("Manual token or Fuyonder account.")
-        .addDropdown((dropdown) =>
-          dropdown
-            .addOption("manual-token", "Manual token")
-            .addOption("company-sso", "Fuyonder account")
-            .setValue(this.host.settings.authMode)
-            .onChange(async (value) => {
-              this.host.settings.authMode = value as AuthMode;
-              await this.host.saveSettings();
-              this.render();
-            })
-        );
-    } else {
-      new Setting(servicePanel)
-        .setName("Sign-in method")
-        .setDesc("DocFerry uses Fuyonder account login for this release.")
-        .addButton((button) => {
-          button.setButtonText("Log in / Sign up");
-          button.setCta();
-          button.onClick(() => {
-            void this.startCompanySignIn();
-          });
-        });
+      renderSettingsFact(facts, "Last refreshed", membership ? formatDateTime(membership.refreshedAt) : "Never");
     }
 
-    if (MANUAL_TOKEN_ENTRY_ENABLED && this.host.settings.authMode === "manual-token") {
-      new Setting(servicePanel)
-        .setName("API token")
-        .setDesc("Internal seed token for the DocFerry service.")
-        .addText((text) => {
-          text.inputEl.type = "password";
-          text
-            .setPlaceholder("Paste token")
-            .setValue(this.host.settings.manualApiToken)
-            .onChange(async (value) => {
-              this.host.settings.manualApiToken = value.trim();
-              this.host.settings.apiToken = this.host.settings.manualApiToken;
-              await this.host.saveSettings();
-            });
-        });
+    this.renderAccountActions(panel, connected);
+    status.setAttr("aria-label", connected ? "Connected" : "Current account status");
+  }
+
+  private renderAccountActions(containerEl: HTMLElement, connected: boolean): void {
+    const actions = containerEl.createDiv({ cls: "docferry-account-quick-actions" });
+    if (!connected) {
+      const loginButton = actions.createEl("button", { cls: "mod-cta", attr: { type: "button" } });
+      appendButtonLabel(loginButton, "log-in", "Log in");
+      addAsyncClickListener(loginButton, async () => this.host.startLogin());
+      const signupButton = actions.createEl("button", { attr: { type: "button" } });
+      appendButtonLabel(signupButton, "user-plus", "Create account");
+      addAsyncClickListener(signupButton, async () => this.host.startSignup());
+      return;
     }
+    const dashboardButton = actions.createEl("button", { cls: "mod-cta", attr: { type: "button" } });
+    appendButtonLabel(dashboardButton, "layout-dashboard", "Open dashboard");
+    addAsyncClickListener(dashboardButton, async () => this.host.openDashboardHome());
+    const refreshButton = actions.createEl("button", { attr: { type: "button" } });
+    appendButtonLabel(refreshButton, "refresh-cw", "Refresh access");
+    addAsyncClickListener(refreshButton, async () => {
+      await this.host.refreshMembership(true);
+      this.render();
+    });
+  }
+
+  private renderSharingSection(containerEl: HTMLElement): void {
+    this.renderPageIntro(containerEl, "Sharing", "Defaults used when you publish a note or folder.");
+    const sharesPanel = containerEl.createDiv({
+      cls: "docferry-settings-panel docferry-settings-share-entry"
+    });
+    const sharesHeader = sharesPanel.createDiv({ cls: "docferry-panel-header" });
+    const sharesCopy = sharesHeader.createDiv();
+    sharesCopy.createDiv({
+      text: "Published content",
+      cls: "docferry-heading docferry-heading-3",
+      attr: { role: "heading", "aria-level": "3" }
+    });
+    sharesCopy.createEl("p", { text: "Review active and past note or folder shares." });
+    const sharesButton = sharesHeader.createEl("button", { cls: "mod-cta", attr: { type: "button" } });
+    appendButtonLabel(sharesButton, "files", "Open shares");
+    addAsyncClickListener(sharesButton, async () => this.host.openSharesPage());
 
     const defaultsPanel = containerEl.createDiv({ cls: "docferry-settings-panel" });
     const defaultsHeader = defaultsPanel.createDiv({ cls: "docferry-panel-header" });
     const defaultsCopy = defaultsHeader.createDiv();
-    defaultsCopy.createDiv({ text: "Defaults", cls: "docferry-heading docferry-heading-3" });
-    defaultsCopy.createEl("p", { text: "Initial values for publish and import." });
+    defaultsCopy.createDiv({
+      text: "Publish defaults",
+      cls: "docferry-heading docferry-heading-3",
+      attr: { role: "heading", "aria-level": "3" }
+    });
+    defaultsCopy.createEl("p", { text: "You can still change these options before each share." });
 
     new Setting(defaultsPanel)
       .setName("Password by default")
       .setDesc("Preselect password protection in the publish dialog.")
       .addToggle((toggle) =>
         toggle
-          .setValue(this.host.settings.defaultPasswordEnabled)
+          .setValue(this.host.docferrySettings.defaultPasswordEnabled)
           .onChange(async (value) => {
-            this.host.settings.defaultPasswordEnabled = value;
+            this.host.docferrySettings.defaultPasswordEnabled = value;
             await this.host.saveSettings();
           })
       );
@@ -615,56 +316,70 @@ export class DocferrySettingTab extends PluginSettingTab {
         dropdown
           .addOption("never", "Never")
           .addOption("30", "30 days")
-          .setValue(this.host.settings.defaultExpiresInDays)
+          .setValue(this.host.docferrySettings.defaultExpiresInDays)
           .onChange(async (value) => {
-            this.host.settings.defaultExpiresInDays = value;
+            this.host.docferrySettings.defaultExpiresInDays = value;
             await this.host.saveSettings();
           })
       );
 
-    new Setting(defaultsPanel)
+  }
+
+  private renderImportsSection(containerEl: HTMLElement): void {
+    this.renderPageIntro(containerEl, "Imports", "Choose where saved links and generated notes are written.");
+    const panel = containerEl.createDiv({ cls: "docferry-settings-panel" });
+    const header = panel.createDiv({ cls: "docferry-panel-header" });
+    const copy = header.createDiv();
+    copy.createDiv({
+      text: "Save location",
+      cls: "docferry-heading docferry-heading-3",
+      attr: { role: "heading", "aria-level": "3" }
+    });
+    copy.createEl("p", { text: "Applied to DocFerry shares, web pages, audio, and video." });
+    new Setting(panel)
       .setName("Default import folder")
-      .setDesc("Used by the dashboard import flow and as the default value in the import dialog.")
+      .setDesc("Vault folder used by the DocFerry home page and import dialogs.")
       .addText((text) =>
         text
           .setPlaceholder(DEFAULT_SETTINGS.defaultImportFolder)
-          .setValue(this.host.settings.defaultImportFolder || DEFAULT_SETTINGS.defaultImportFolder)
+          .setValue(this.host.docferrySettings.defaultImportFolder || DEFAULT_SETTINGS.defaultImportFolder)
           .onChange(async (value) => {
-            this.host.settings.defaultImportFolder = normalizeVaultFolder(value) || DEFAULT_SETTINGS.defaultImportFolder;
+            this.host.docferrySettings.defaultImportFolder = normalizeVaultFolder(value) || DEFAULT_SETTINGS.defaultImportFolder;
             await this.host.saveSettings();
           })
       );
+  }
 
-    new Setting(defaultsPanel)
-      .setName("Image quality")
-      .setDesc("The current public build uploads original image bytes. Optimized tiers are not enabled in the plugin UI.");
-
-    new Setting(defaultsPanel)
-      .setName("Loaded plugin version")
-      .setDesc(this.host.manifest.version);
-
-    const diagnosticsPanel = containerEl.createDiv({ cls: "docferry-settings-panel" });
-    const diagnosticsHeader = diagnosticsPanel.createDiv({ cls: "docferry-panel-header" });
-    const diagnosticsCopy = diagnosticsHeader.createDiv();
-    diagnosticsCopy.createDiv({ text: "Diagnostics", cls: "docferry-heading docferry-heading-3" });
-    diagnosticsCopy.createEl("p", { text: "Local troubleshooting controls." });
-
-    new Setting(diagnosticsPanel)
+  private renderAdvancedSection(containerEl: HTMLElement): void {
+    this.renderPageIntro(containerEl, "Advanced", "Connection diagnostics and local plugin controls.");
+    const advancedBody = containerEl.createDiv({ cls: "docferry-settings-panel docferry-settings-advanced-body" });
+    new Setting(advancedBody)
+      .setName("Test connection")
+      .setDesc("Check whether DocFerry can reach the service.")
+      .addButton((button) => button.setButtonText("Test").onClick(() => void this.host.testConnection()));
+    new Setting(advancedBody)
       .setName("Debug logging")
-      .setDesc("Logs publish details to the developer console.")
+      .setDesc("Include extra details in the developer console for troubleshooting.")
       .addToggle((toggle) =>
-        toggle.setValue(this.host.settings.debug).onChange(async (value) => {
-          this.host.settings.debug = value;
+        toggle.setValue(this.host.docferrySettings.debug).onChange(async (value) => {
+          this.host.docferrySettings.debug = value;
           await this.host.saveSettings();
           new Notice(value ? "Debug logging enabled" : "Debug logging disabled");
         })
       );
-  }
-
-  private async startCompanySignIn(): Promise<void> {
-    this.host.settings.authMode = "company-sso";
-    await this.host.saveSettings();
-    await this.host.startLogin();
+    new Setting(advancedBody).setName("Plugin version").setDesc(this.host.manifest.version);
+    new Setting(advancedBody)
+      .setName("Disconnect account")
+      .setDesc("Remove this Bondie account from this Obsidian device.")
+      .addButton((button) => {
+        button.setButtonText("Disconnect");
+        button.setWarning();
+        button.setDisabled(!this.host.docferrySettings.sessionToken && !this.host.docferrySettings.connectedAccount);
+        button.onClick(async () => {
+          await this.host.disconnectAccount();
+          this.render();
+        });
+      });
   }
 }
 
@@ -715,6 +430,12 @@ export function renderAccountAvatar(containerEl: HTMLElement, user?: DisplayUser
   return avatar;
 }
 
+function renderSettingsFact(containerEl: HTMLElement, label: string, value: string): void {
+  const fact = containerEl.createDiv({ cls: "docferry-settings-account-fact" });
+  fact.createSpan({ text: label });
+  fact.createEl("strong", { text: value });
+}
+
 export function formatDateTime(value?: string | null): string {
   if (!value) return "Never";
   const date = new Date(value);
@@ -759,61 +480,66 @@ export function formatBytes(value: number): string {
 
 export function membershipUnavailableMessage(reason?: string | null): string {
   if (reason === "synapsehub_user_session_required") {
-    return "Refresh your Fuyonder login before managing quota. DocFerry is using Free limits until the session is refreshed.";
+    return "Refresh your account before changing plans.";
   }
   if (reason === "synapsehub_runtime_unreachable") {
-    return "Access refresh is unavailable. DocFerry is using Free limits until it can refresh again.";
+    return "Plan refresh is temporarily unavailable.";
   }
   if (reason === "synapsehub_runtime_failed") {
-    return "Access refresh failed. DocFerry is using Free limits until the next successful refresh.";
+    return "Plan refresh failed. Try again later.";
   }
   if (reason) {
-    return "Access refresh is temporarily unavailable. DocFerry is using Free limits until refresh succeeds.";
+    return "Plan refresh is temporarily unavailable.";
   }
   return "";
 }
 
-export function membershipAccessLabel(membership: MembershipSnapshot): string {
-  if (membership.planKey === "free") return "Free";
-  if (membership.source === "staff_manual_grant") return "Plus";
-  if (membership.planDisplayName) return membership.planDisplayName;
-  return "Plus";
+export function shareCountLabel(count: number): string {
+  if (count === 1) return "1 shared note.";
+  return `${count} shared notes.`;
 }
 
 export function membershipFromResponse(
-  response: {
-    product_key: string;
-    plan_key: string;
-    plan_display_name: string;
-    entitlement_key?: string | null;
-    active_share_count: number;
-    active_share_limit: number;
-    max_single_file_size_bytes: number;
-    can_create_share: boolean;
-    limit_source: string;
-    cache: { status: string };
-    unavailable_reason?: string | null;
-    billing?: { enabled?: boolean | null; plans?: BillingPlan[] | null } | null;
-  },
+  response: MembershipResponse,
   refreshedAt = new Date().toISOString()
 ): MembershipSnapshot {
-  const billing = response.billing ?? null;
-  const billingPlans = Array.isArray(billing?.plans) ? billing.plans : [];
   return {
     productKey: response.product_key,
+    accessRole: response.access_role,
     planKey: response.plan_key,
     planDisplayName: response.plan_display_name,
     entitlementKey: response.entitlement_key ?? null,
     activeShareCount: response.active_share_count,
     activeShareLimit: response.active_share_limit,
+    activeFolderShareCount: response.active_folder_share_count,
+    activeFolderShareLimit: response.active_folder_share_limit,
+    maxFolderDocumentCount: response.max_folder_document_count,
+    maxFolderTotalBytes: response.max_folder_total_bytes,
     maxSingleFileSizeBytes: response.max_single_file_size_bytes,
     canCreateShare: response.can_create_share,
+    canCreateFolderShare: response.can_create_folder_share,
+    canUseFullTheme: response.can_use_full_theme,
+    hasMediaNoteEntitlement: response.feature_gates["docferry.ai.assist"] === true,
+    canUseMediaNote: canUseMediaNote(
+      response.feature_gates["docferry.ai.assist"] === true,
+      {
+        enabled: response.media_note.enabled,
+        supportedProviders: response.media_note.supported_providers
+      }
+    ),
+    mediaNoteProviders: [...response.media_note.supported_providers],
+    mediaNoteSourceKinds: [...response.media_note.supported_source_kinds],
+    mediaNoteActiveJobs: response.media_note_usage.active_jobs,
+    mediaNoteActiveJobLimit: response.media_note_usage.active_job_limit,
+    mediaNoteMonthlyJobsUsed: response.media_note_usage.monthly_jobs_used,
+    mediaNoteMonthlyJobLimit: response.media_note_usage.monthly_job_limit,
+    mediaNoteResetsAt: response.media_note_usage.resets_at,
     source: response.limit_source,
     cacheStatus: response.cache.status,
     refreshedAt,
     unavailableReason: response.unavailable_reason ?? null,
-    billingEnabled: Boolean(billing?.enabled),
-    billingPlans: billingPlans.map((plan) => ({
+    billingEnabled: Boolean(response.billing.enabled),
+    billingPlans: response.billing.plans.map((plan) => ({
       planKey: plan.plan_key,
       displayName: plan.display_name,
       amountMinorUnits: plan.amount_minor_units,
@@ -822,6 +548,14 @@ export function membershipFromResponse(
       testOnly: Boolean(plan.test_only)
     }))
   };
+}
+
+export function membershipUsageLabel(count: number, limit: number | null): string {
+  return `${count}/${membershipLimitLabel(limit)}`;
+}
+
+export function membershipLimitLabel(limit: number | null): string {
+  return limit === null ? "Unlimited" : String(limit);
 }
 
 function appendButtonLabel(button: HTMLElement, iconName: string, label: string): void {

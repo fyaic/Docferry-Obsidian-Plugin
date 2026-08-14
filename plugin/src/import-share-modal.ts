@@ -1,6 +1,7 @@
 import { App, Modal, Notice, Setting } from "obsidian";
 import { renderDocferryHeader } from "./brand";
 import { DEFAULT_SETTINGS, normalizeVaultFolder } from "./settings";
+import { parseDocferryShareUrl } from "./share-url";
 
 export interface ImportShareOptions {
   url: string;
@@ -17,7 +18,12 @@ export class ImportShareModal extends Modal {
   private outputFolder = DEFAULT_SETTINGS.defaultImportFolder;
   private overwrite = false;
 
-  constructor(app: App, initialUrl: unknown = "", defaultOutputFolder: unknown = DEFAULT_SETTINGS.defaultImportFolder) {
+  constructor(
+    app: App,
+    initialUrl: unknown = "",
+    defaultOutputFolder: unknown = DEFAULT_SETTINGS.defaultImportFolder,
+    private readonly serviceUrl: string = DEFAULT_SETTINGS.serverUrl
+  ) {
     super(app);
     this.url = typeof initialUrl === "string" ? initialUrl : "";
     this.outputFolder = normalizeVaultFolder(defaultOutputFolder) || DEFAULT_SETTINGS.defaultImportFolder;
@@ -40,7 +46,7 @@ export class ImportShareModal extends Modal {
       .setDesc("Import one DocFerry share into this vault.")
       .addText((text) => {
         text
-          .setPlaceholder("https://docferry.example/s/abc123")
+          .setPlaceholder("https://docferry.bondie.io/s/...")
           .setValue(this.url)
           .onChange((value) => {
             this.url = value.trim();
@@ -81,7 +87,7 @@ export class ImportShareModal extends Modal {
       this.finish(null);
     });
     buttons.createEl("button", { text: "Import", cls: "mod-cta" }).addEventListener("click", () => {
-      if (!isValidShareUrl(this.url)) {
+      if (!parseDocferryShareUrl(this.url, this.serviceUrl)) {
         new Notice("Enter a valid DocFerry share URL.");
         return;
       }
@@ -108,16 +114,5 @@ export class ImportShareModal extends Modal {
     this.done = true;
     this.resolver(value);
     this.close();
-  }
-}
-
-function isValidShareUrl(value: unknown): boolean {
-  const raw = typeof value === "string" ? value : "";
-  try {
-    const parsed = new URL(raw.trim());
-    const parts = parsed.pathname.split("/").filter(Boolean);
-    return parsed.protocol.startsWith("http") && Boolean(parsed.host) && parts.length >= 2 && parts[0] === "s";
-  } catch {
-    return false;
   }
 }

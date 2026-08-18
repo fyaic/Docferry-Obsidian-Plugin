@@ -1,6 +1,7 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting, setIcon } from "obsidian";
 import { DOCFERRY_PRODUCT_DESCRIPTION, DOCFERRY_PRODUCT_NAME, renderDocferryHeader } from "./brand";
 import { canUseMediaNote } from "./media-note-availability";
+import type { PendingMediaNoteSubmission } from "./media-note-submission";
 import type {
   DisplayUser,
   MembershipResponse,
@@ -69,8 +70,9 @@ export interface DocferrySettings {
   connectedAccount: ConnectedAccount | null;
   membership: MembershipSnapshot | null;
   pendingMediaNoteImport: PendingMediaNoteImport | null;
-  pendingAuthState: string;
-  pendingAuthStartedAt: string;
+  pendingMediaNoteSubmission: PendingMediaNoteSubmission | null;
+  // The pending login handshake (state, startedAt, PKCE verifier) lives in
+  // SecretStorage, never in persisted settings; see session-token-custody.ts.
   clientInstanceId: string;
   defaultPasswordEnabled: boolean;
   defaultExpiresInDays: string;
@@ -86,8 +88,7 @@ export const DEFAULT_SETTINGS: DocferrySettings = {
   connectedAccount: null,
   membership: null,
   pendingMediaNoteImport: null,
-  pendingAuthState: "",
-  pendingAuthStartedAt: "",
+  pendingMediaNoteSubmission: null,
   clientInstanceId: "",
   defaultPasswordEnabled: false,
   defaultExpiresInDays: "never",

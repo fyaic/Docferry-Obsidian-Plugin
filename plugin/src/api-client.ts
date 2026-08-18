@@ -237,8 +237,8 @@ export class ShareApiClient {
     return this.getJson("/v0/auth/config");
   }
 
-  async exchangePendingAuth(state: string): Promise<AuthExchangeResponse | PendingAuthExchangeResponse> {
-    return this.postJson("/v0/auth/exchange/pending", { state });
+  async exchangePendingAuth(state: string, codeVerifier: string): Promise<AuthExchangeResponse | PendingAuthExchangeResponse> {
+    return this.postJson("/v0/auth/exchange/pending", { state, code_verifier: codeVerifier });
   }
 
   async createDeviceAuthorization(payload: {

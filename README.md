@@ -14,9 +14,9 @@ sign in with a Bondie account in your system browser, and work from one simple
 home page. No server deployment, model key, or provider configuration is
 required.
 
-> **Major update:** `0.0.66` replaces the former free-service release with the
-> full Bondie-powered product while keeping the existing Community plugin ID
-> `docferry`. Existing users should read the
+> **Corrective update:** `0.0.67` hardens the full Bondie-powered product after
+> the `0.0.66` free-to-paid transition while keeping the existing Community
+> plugin ID `docferry`. Existing users should read the
 > [migration guide](docs/MIGRATION-FROM-FREE.md) and sign in again after the
 > update.
 
@@ -135,7 +135,7 @@ npm --prefix plugin ci
 npm run check:release
 ```
 
-`check:release` runs the official-style ESLint rules, 70 client tests, a clean
+`check:release` runs the official-style ESLint rules, 134 client tests, a clean
 TypeScript bundle, `node --check`, metadata and license checks, domain-boundary
 checks, and a public-source scan. The release workflow rebuilds from source and
 attests `main.js`, `manifest.json`, and `styles.css` before publishing.

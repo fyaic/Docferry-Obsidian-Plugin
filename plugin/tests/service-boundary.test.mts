@@ -35,8 +35,12 @@ test("switching product services clears sessions and owner-scoped pending work",
       sourceUrl: "https://example.com/video",
       createdAt: "2026-08-14T00:00:00.000Z"
     },
-    pendingAuthState: "retired-state",
-    pendingAuthStartedAt: "2026-08-14T00:00:00.000Z"
+    pendingMediaNoteSubmission: {
+      key: "plugin-retired-key",
+      sourceUrl: "https://example.com/video",
+      ownerProductSubjectId: "retired-owner",
+      createdAt: "2026-08-14T00:00:00.000Z"
+    }
   };
 
   assert.equal(enforceProductionServiceBoundary(settings, SERVICE_URL), true);
@@ -45,7 +49,6 @@ test("switching product services clears sessions and owner-scoped pending work",
   assert.equal(settings.connectedAccount, null);
   assert.equal(settings.membership, null);
   assert.equal(settings.pendingMediaNoteImport, null);
-  assert.equal(settings.pendingAuthState, "");
-  assert.equal(settings.pendingAuthStartedAt, "");
+  assert.equal(settings.pendingMediaNoteSubmission, null);
   assert.equal(enforceProductionServiceBoundary(settings, SERVICE_URL), false);
 });

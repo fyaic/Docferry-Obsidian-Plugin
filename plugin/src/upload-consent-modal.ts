@@ -1,5 +1,6 @@
 import { App, Modal, setIcon } from "obsidian";
 import { appendDocferryLogo } from "./brand";
+import { containModalFocus } from "./modal-focus";
 
 export type UploadConsentContext = "startup" | "publish" | "detailed_note";
 
@@ -24,6 +25,7 @@ class DocferryUploadConsentModal extends Modal {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("docferry-upload-consent-modal");
+    containModalFocus(this);
 
     const header = contentEl.createDiv({ cls: "docferry-consent-header" });
     appendDocferryLogo(header, "docferry-consent-logo").setAttr("aria-hidden", "true");
@@ -43,7 +45,7 @@ class DocferryUploadConsentModal extends Modal {
 
     const summary = contentEl.createDiv({ cls: "docferry-consent-summary" });
     appendConsentItem(summary, "file-check-2", "You choose what leaves Obsidian", "Only the note, folder, files, or public link you select. Some supported links may use external AI to prepare a note.");
-    appendConsentItem(summary, "shield-check", "Protected during transfer and storage", "Connections use HTTPS and stored content is encrypted on DocFerry servers.");
+    appendConsentItem(summary, "shield-check", "Protected during transfer and storage", "Connections use HTTPS and stored content is encrypted. Attachments may upload straight to Tencent Cloud storage with a short-lived credential.");
     appendConsentItem(summary, "sliders-horizontal", "You stay in control", "Add a password or expiry, and stop a share whenever you need to.");
 
     contentEl.createEl("p", {
@@ -59,10 +61,14 @@ class DocferryUploadConsentModal extends Modal {
       text:
         "Sharing uploads the selected note or folder, its web snapshot, and referenced local files. Saving a supported public link sends its URL to DocFerry. For supported media, DocFerry may send a public YouTube URL or bounded audio or video content, including a reviewed public Bilibili stream, through OpenRouter to a server-selected AI model to create the note. OpenRouter and the selected model provider process that input. DocFerry does not send your Bondie identity, browser cookies, history, profile, or other vault files."
     });
+    detailsBody.createEl("p", {
+      text:
+        "To keep publishing fast, referenced images and attachments may upload directly from this device to Tencent Cloud Object Storage (COS), a third-party storage provider. DocFerry issues a temporary credential that lasts about 30 minutes, works only for that single upload, and is never saved by the plugin. Only files referenced by the note you publish, and the optional Pro theme style snapshot, use this path; your note text is sent to DocFerry, not to cloud storage. If direct upload is unavailable or fails, the file is uploaded through the DocFerry server instead."
+    });
     detailsBody.createEl("h3", { text: "Passwords, sessions, and retention", cls: "docferry-heading docferry-heading-4" });
     detailsBody.createEl("p", {
       text:
-        "Share passwords are stored as one-way hashes. Your account token stays in this plugin on this device. Temporary import content is cleared after its retention period. Anyone with the link, and its password when enabled, can view the shared content."
+        "Share passwords are stored as one-way hashes. Your account token is stored by your operating system's secure storage on this device, not in plugin data. Temporary import content is cleared after its retention period. Uploaded assets stay stored while a share is live, and unreferenced assets become eligible for deletion after 7 days. Stopping a share makes its content unavailable right away; stored content is cleared after its retention period. Anyone with the link, and its password when enabled, can view the shared content."
     });
     const privacy = detailsBody.createEl("a", {
       text: "Read the DocFerry Privacy Policy",

@@ -1,6 +1,7 @@
 import { App, Modal, Notice, setIcon } from "obsidian";
 import { renderDocferryHeader } from "./brand";
 import { openExternalUrl } from "./external-links";
+import { containModalFocus } from "./modal-focus";
 
 export class ResultModal extends Modal {
   constructor(
@@ -17,6 +18,7 @@ export class ResultModal extends Modal {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("docferry-result-modal");
+    containModalFocus(this);
 
     renderDocferryHeader(
       contentEl,
@@ -47,7 +49,7 @@ export class ResultModal extends Modal {
     const openButton = buttons.createEl("button", { attr: { type: "button" } });
     appendButtonLabel(openButton, "external-link", "Open");
     openButton.addEventListener("click", () => {
-      openExternalUrl(this.url);
+      void openExternalUrl(this.url);
     });
 
     const doneButton = buttons.createEl("button", { attr: { type: "button" } });

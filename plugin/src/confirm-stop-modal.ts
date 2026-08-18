@@ -31,6 +31,53 @@ export function confirmDeleteShareHistory(app: App, title: string, sourcePath?: 
   });
 }
 
+export function confirmUnreachableShareRepublish(
+  app: App,
+  title: string,
+  sourcePath: string | null | undefined,
+  previousUrl: string
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    new ConfirmShareActionModal(
+      app,
+      "Publish a new link for this note?",
+      "The previous share link is not visible to the current Bondie account. It may belong to a " +
+        "different account or may have been deleted. Publishing creates a new link under the " +
+        "current account; the previous reference is preserved in the note's properties as " +
+        "df_legacy_url.",
+      "Cancel",
+      "Publish new link",
+      title,
+      sourcePath || "",
+      resolve,
+      previousUrl ? [previousUrl] : []
+    ).open();
+  });
+}
+
+export function confirmLegacyShareMigration(
+  app: App,
+  title: string,
+  sourcePath: string | null | undefined,
+  legacyUrl: string
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    new ConfirmShareActionModal(
+      app,
+      "Republish from the legacy free service?",
+      "This note was shared with the earlier DocFerry free service. That link may still be live, " +
+        "but it can no longer be managed from this vault. Publishing creates a new link on the current " +
+        "DocFerry service; the old link is preserved in the note's properties as df_legacy_url.",
+      "Cancel",
+      "Publish new link",
+      title,
+      sourcePath || "",
+      resolve,
+      [legacyUrl]
+    ).open();
+  });
+}
+
 class ConfirmShareActionModal extends Modal {
   private done = false;
 
@@ -42,7 +89,8 @@ class ConfirmShareActionModal extends Modal {
     private readonly confirmLabel: string,
     private readonly title: string,
     private readonly sourcePath: string,
-    private readonly resolve: (confirmed: boolean) => void
+    private readonly resolve: (confirmed: boolean) => void,
+    private readonly extraLines: string[] = []
   ) {
     super(app);
   }
@@ -58,6 +106,12 @@ class ConfirmShareActionModal extends Modal {
     if (this.sourcePath) {
       contentEl.createEl("p", {
         text: this.sourcePath,
+        cls: "setting-item-description"
+      });
+    }
+    for (const line of this.extraLines) {
+      contentEl.createEl("p", {
+        text: line,
         cls: "setting-item-description"
       });
     }

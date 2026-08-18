@@ -291,8 +291,8 @@ export class DocferryDashboardView extends ItemView {
       const recoveryIcon = recovery.createSpan({ attr: { "aria-hidden": "true" } });
       setIcon(recoveryIcon, "history");
       const recoveryCopy = recovery.createSpan({ cls: "docferry-import-progress-copy" });
-      recoveryCopy.createSpan({ text: "Detailed note still processing", cls: "docferry-import-progress-title" });
-      recoveryCopy.createSpan({ text: "Resume this task or cancel it. Starting another will not duplicate the work." });
+      recoveryCopy.createSpan({ text: "Detailed note pending review", cls: "docferry-import-progress-title" });
+      recoveryCopy.createSpan({ text: "Resume the review or cancel it. Starting another will not duplicate the work." });
       const recoveryActions = recovery.createDiv({ cls: "docferry-import-recovery-actions" });
       const resumeButton = recoveryActions.createEl("button", { cls: "mod-cta", attr: { type: "button" } });
       appendButtonLabel(resumeButton, "play", "Resume");
@@ -496,7 +496,7 @@ export class DocferryDashboardView extends ItemView {
           const openButton = actions.createEl("button", { attr: { type: "button", "aria-label": "Open share URL" } });
           appendButtonLabel(openButton, "external-link", "Open");
           openButton.addEventListener("click", () => {
-            openExternalUrl(share.url);
+            void openExternalUrl(share.url);
           });
           const linksButton = actions.createEl("button", { attr: { type: "button", "aria-label": "Show linked note status" } });
           appendButtonLabel(linksButton, "list-checks", "Links");

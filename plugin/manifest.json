@@ -1,9 +1,9 @@
 {
   "id": "docferry",
   "name": "DocFerry",
-  "version": "0.0.66",
+  "version": "0.0.67",
   "minAppVersion": "1.12.7",
-  "description": "Save public links as notes, publish secure notes, and unlock Pro folder sharing and media summaries.",
+  "description": "Save links as notes, import DocFerry shares, and publish secure note shares with a free Bondie account; Pro adds folder sharing, theme styling, and Advanced Import.",
   "author": "Bondie",
   "authorUrl": "https://bondie.io",
   "isDesktopOnly": true

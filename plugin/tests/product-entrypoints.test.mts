@@ -32,7 +32,7 @@ test("gives disconnected users a visible path into browser login", () => {
 test("binds dashboard updates to the selected share and source vault", () => {
   assert.match(mainSource, /if \(!share\.vault_id \|\| share\.vault_id !== vaultId\)/);
   assert.match(mainSource, /await this\.publishFile\(file, share\)/);
-  assert.match(mainSource, /const existingShareId = existingShare\?\.share_id \?\? existing\.id/);
+  assert.match(mainSource, /const existingShareId = existingShare\?\.share_id \?\? existingMetaId/);
   assert.match(mainSource, /this\.updateOrCreateShare\(existingShareId, payload, notice\)/);
 });
 

@@ -1,5 +1,6 @@
 import { App, Modal, Notice, Setting } from "obsidian";
 import { renderDocferryHeader } from "./brand";
+import { containModalFocus } from "./modal-focus";
 import { resolveExpirySelection } from "./publish-state";
 import type { PublishOptions } from "./types";
 
@@ -47,6 +48,7 @@ export class FolderShareModal extends Modal {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("docferry-folder-share-modal");
+    containModalFocus(this);
     renderDocferryHeader(
       contentEl,
       this.defaults.isUpdate ? "Update this folder" : "Share this folder",

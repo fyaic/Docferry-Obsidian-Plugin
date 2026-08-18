@@ -39,7 +39,7 @@ class MediaNotePreviewModal extends Modal {
     }
 
     const buttons = contentEl.createDiv({ cls: "modal-button-container" });
-    buttons.createEl("button", { text: "Not now" }).addEventListener("click", () => this.finish(false));
+    buttons.createEl("button", { text: "Review later" }).addEventListener("click", () => this.finish(false));
     buttons.createEl("button", { text: "Save note", cls: "mod-cta" }).addEventListener("click", () => {
       this.finish(true);
     });

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.0.67
+
+- Bind Obsidian browser login completion to its initiating plugin with S256
+  PKCE and keep session and pending-login secrets in SecretStorage.
+- Continue email-verification signup in the DocFerry flow and make account
+  switching and login polling transactional.
+- Revalidate paid mutations, serialize Share quota decisions, and persist
+  Advanced Import retry identity.
+- Preserve historical Share references behind an explicit migration decision
+  and repair inactive/moved/dead Share metadata handling.
+- Preserve completed Advanced Imports for later review, derive supported
+  YouTube covers deterministically, and keep dialogs usable at narrow sizes.
+- Align direct Tencent COS upload disclosure and Community paid-product copy.
+
 ## 0.0.66
 
 - Replace the retired free-service client with the complete Bondie-powered

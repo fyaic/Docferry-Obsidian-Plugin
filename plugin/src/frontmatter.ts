@@ -1,4 +1,5 @@
 import { App, TFile } from "obsidian";
+import { legacyFrontmatterFields, type LegacyShareMeta } from "./share-url";
 import type { ShareMeta, ShareResponse } from "./types";
 
 const FIELD_ID = "df_id";
@@ -32,6 +33,19 @@ export async function writeShareMeta(
     frontmatter[FIELD_UPDATED] = response.updated_at;
     frontmatter[FIELD_PASSWORD_ENABLED] = options.passwordEnabled;
     frontmatter[FIELD_EXPIRES] = options.expiresAt ?? null;
+  });
+}
+
+export async function preserveLegacyShareMeta(
+  app: App,
+  file: TFile,
+  legacy: LegacyShareMeta
+): Promise<void> {
+  await app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
+    const fields = legacyFrontmatterFields(frontmatter, legacy);
+    for (const [key, value] of Object.entries(fields)) {
+      frontmatter[key] = value;
+    }
   });
 }
 

@@ -43,7 +43,7 @@ export class LinkStatusModal extends Modal {
           })
           .addButton((button) => {
             button.setButtonText("Open").onClick(() => {
-              openExternalUrl(targetUrl);
+              void openExternalUrl(targetUrl);
             });
           });
       }

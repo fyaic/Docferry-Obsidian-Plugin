@@ -11,7 +11,7 @@ only when you use account, Share, import, or access features.
 
 | Feature | Default | Local files written | Data sent off device | User control |
 | --- | --- | --- | --- | --- |
-| Account connection | Off until sign-in | Product session and display-only account cache in plugin data | Login completion data and low-sensitivity plugin instance context | Disconnect in Preferences or disable the plugin |
+| Account connection | Off until sign-in | Product session and pending-login secrets in Obsidian SecretStorage; display-only account cache in plugin data | Login completion data and low-sensitivity plugin instance context | Disconnect in Preferences or disable the plugin |
 | Publish Share | User-triggered | `df_*` metadata on the selected note | Selected title, body, rendered snapshot, explicitly referenced assets, chosen Share options, and client metadata | Publish only content you choose; stop sharing later |
 | Share management | User-triggered | No note content unless a Share is updated or stopped | Owner-scoped list and status requests | Use Shares or the Dashboard |
 | Import DocFerry Share | User-triggered | Imported note and listed assets in the selected folder | Share URL, optional password, and bounded import requests | Choose the output folder; delete local files at any time |
@@ -35,10 +35,12 @@ access may already have viewed or copied the content.
 ## Local storage
 
 Plugin data can include the fixed production service URL, local client
-instance ID, product session token, display-only account and membership cache,
-publish/import defaults, privacy-disclosure acceptance, and owner-scoped state
-for an unfinished Advanced Import so it can be cancelled or resumed after a
-restart.
+instance ID, display-only account and membership cache, publish/import
+defaults, privacy-disclosure acceptance, and owner-scoped state for an
+unfinished Advanced Import so it can be cancelled or resumed after a restart.
+The product session and pending-login verifier are stored in Obsidian
+SecretStorage, not in `data.json`. Legacy plaintext values are migrated or
+cleared fail-closed by the corrective release.
 
 Share metadata is written to the selected note frontmatter using `df_*` keys.
 An import validates and downloads all listed assets before committing the note;

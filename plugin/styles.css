@@ -2597,6 +2597,18 @@
   max-width: 560px;
 }
 
+/* Bounded, internally scrolling dialogs: on short or narrow hosts the modal
+   stays inside the viewport and Save/Cancel remain reachable by scrolling. */
+.docferry-share-modal,
+.docferry-folder-share-modal,
+.docferry-upload-consent-modal,
+.docferry-result-modal {
+  max-height: min(86vh, 720px);
+  max-height: min(86dvh, 720px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .docferry-share-modal .docferry-plugin-header,
 .docferry-folder-share-modal .docferry-plugin-header {
   gap: 11px;

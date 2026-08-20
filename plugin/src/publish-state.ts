@@ -19,6 +19,18 @@ export function resolveExpirySelection(
   return expires.toISOString();
 }
 
+export function resolveFreshExpiryAfterUpdateFallback(
+  selection: string | undefined,
+  selectedExpiresAt: string | null | undefined,
+  configuredDefault: string,
+  now: Date = new Date()
+): string | null {
+  // "keep" refers to the old public link. A replacement is a new link and
+  // must start from the current default instead of inheriting that schedule.
+  if (selection === "keep") return resolveExpirySelection(configuredDefault, null, now);
+  return selectedExpiresAt ?? null;
+}
+
 export function initialThemeStyling(
   canUseThemeStyling: boolean,
   existingThemeMode: "reader" | "full" | null | undefined,

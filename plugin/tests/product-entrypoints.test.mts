@@ -30,10 +30,10 @@ test("gives disconnected users a visible path into browser login", () => {
 });
 
 test("binds dashboard updates to the selected share and source vault", () => {
-  assert.match(mainSource, /if \(!share\.vault_id \|\| share\.vault_id !== vaultId\)/);
+  assert.match(mainSource, /resolveShareUpdateVaultGate\(share\.vault_id, vaultId\) === "wrong-vault"/);
   assert.match(mainSource, /await this\.publishFile\(file, share\)/);
   assert.match(mainSource, /const existingShareId = existingShare\?\.share_id \?\? existingMetaId/);
-  assert.match(mainSource, /this\.updateOrCreateShare\(existingShareId, payload, notice\)/);
+  assert.match(mainSource, /this\.updateOrCreateShare\([\s\S]*?existingShareId,[\s\S]*?file\.path,[\s\S]*?payload,[\s\S]*?resolveFreshExpiryAfterUpdateFallback\(/);
 });
 
 test("preserves protected-share and publish presentation state during updates", () => {
@@ -52,14 +52,25 @@ test("forces the only supported production service URL and removes inert image c
   assert.doesNotMatch(settingsSource, /imageUploadQuality/);
 });
 
-test("keeps local account state when remote logout cannot complete", () => {
-  assert.match(mainSource, /private async logoutBeforeAccountChange\(\): Promise<boolean>/);
-  assert.match(mainSource, /new Notice\(this\.formatError\(error, "Could not switch accounts"\)\);\s*return false/);
+test("keeps the current account until replacement login succeeds", () => {
+  // Opening the browser is not proof that another account authenticated. Keep
+  // the current product session usable until the token-adoption callback has
+  // a confirmed replacement, then revoke the old server session there.
+  for (const start of ["async startSignup", "async reconnectAccount"]) {
+    const startIndex = mainSource.indexOf(start);
+    assert.ok(startIndex > -1, `${start} must exist`);
+    const body = mainSource.slice(startIndex, startIndex + 600);
+    assert.match(body, /await this\.auth\.startLogin\(/);
+    assert.doesNotMatch(body, /clearLocalBondieAccount|logoutBeforeAccountChange|sessionRevoked/);
+  }
+  assert.match(mainSource, /const previousToken = this\.docferrySettings\.sessionToken/);
+  assert.match(mainSource, /if \(previousToken && previousToken !== token\)/);
+  assert.match(mainSource, /await this\.replaceSessionToken\(previousToken, token\)/);
+  assert.match(mainSource, /await this\.api\.logoutToken\(previousToken\)/);
   assert.match(
     mainSource,
     /if \(!isInvalidProductSessionError\(error\)\) \{\s*new Notice\(this\.formatError\(error, "Could not disconnect"\)\);\s*return;\s*\}/
   );
-  assert.match(mainSource, /if \(!\(await this\.logoutBeforeAccountChange\(\)\)\) return/);
 });
 
 test("does not emit share identifiers, vault paths, or raw errors in debug logs", () => {

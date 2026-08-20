@@ -1,10 +1,18 @@
 import { App, Component, MarkdownRenderer, MarkdownView, Notice, Plugin, TFile, TFolder, normalizePath } from "obsidian";
 import { ShareApiClient, ShareApiError } from "./api-client";
 import { isInvalidProductSessionError } from "./session-errors";
-import { hasActiveShareLink } from "./share-actions";
-import { isMissingShareError, isStoppedShareError } from "./share-lifecycle";
+import { hasActiveShareLink, resolveShareUpdateVaultGate, vaultRelativeShareSourcePath } from "./share-actions";
+import { isInactiveShareError, isMissingShareError } from "./share-lifecycle";
 import { AuthCompletionError, AuthService } from "./auth-service";
-import { confirmDeleteShareHistory, confirmLegacyShareMigration, confirmStopShare, confirmUnreachableShareRepublish } from "./confirm-stop-modal";
+import {
+  confirmDeleteShareHistory,
+  confirmLegacyShareMigration,
+  confirmRecoveredShareReassignment,
+  confirmStopRecoveredShare,
+  confirmStopRecoveredShareBeforeAccountChange,
+  confirmStopShare,
+  confirmUnreachableShareRepublish
+} from "./confirm-stop-modal";
 import {
   DOCFERRY_DASHBOARD_VIEW_TYPE,
   DocferryDashboardView,
@@ -13,7 +21,7 @@ import {
 import { clearShareMeta, preserveLegacyShareMeta, readShareMeta, writeShareMeta } from "./frontmatter";
 import { buildExternalLinkNote, externalLinkProviderLabel } from "./external-import";
 import { openExternalUrl } from "./external-links";
-import { folderShareAccess } from "./folder-share-access";
+import { canShowFolderShareEntry, folderShareAccess } from "./folder-share-access";
 import { FolderShareModal } from "./folder-share-modal";
 import { classifyProtocolCallback } from "./protocol-callback";
 import { confirmLoginToPublish } from "./login-intent-modal";
@@ -32,7 +40,9 @@ import {
 } from "./media-note";
 import { confirmMediaNoteImport } from "./media-note-preview-modal";
 import {
+  MEDIA_NOTE_LOW_QUOTA_NOTICE_THRESHOLD,
   hasMediaNoteJobCapacity,
+  mediaNoteMonthlyJobsRemaining,
   requiresDetailedNoteProvider,
   shouldPrepareDetailedNote
 } from "./media-note-availability";
@@ -54,18 +64,32 @@ import {
 } from "./settings";
 import { enforceProductionServiceBoundary } from "./service-boundary";
 import {
+  finalizeShareCreate,
+  stableSharePayloadString,
+  submitShareCreate,
+  type PendingSharePublish,
+  type SharePublishSubmissionDeps
+} from "./share-publish-submission";
+import {
+  clearStagedSessionToken,
   clearPendingLoginCustody,
   migrateLegacyPendingLogin,
   persistPendingLogin,
   persistSessionToken,
   readPendingLogin,
-  resolveSessionTokenOnLoad
+  resolveSessionTokenOnLoad,
+  stageSessionToken
 } from "./session-token-custody";
 import { legacyShareMetaForService, shareMetaBelongsToService, type LegacyShareMeta } from "./share-url";
 import { ResultModal } from "./result-modal";
 import { ShareModal } from "./share-modal";
-import { initialExpirySelection, initialThemeStyling } from "./publish-state";
+import {
+  initialExpirySelection,
+  initialThemeStyling,
+  resolveFreshExpiryAfterUpdateFallback
+} from "./publish-state";
 import { isRemoteUrl } from "./theme-safety";
+import { isUnsafeAssetPath } from "./asset-path-safety";
 import type {
   FolderShareDocumentPayload,
   FolderShareResponse,
@@ -164,8 +188,10 @@ export default class DocferryPlugin extends Plugin {
   private mediaNoteRecoveryInFlight = false;
   private pendingPublishIntent: { kind: "note" | "folder"; path: string } | null = null;
   private shareImportCommitQueue: Promise<void> = Promise.resolve();
+  private settingsSaveQueue: Promise<void> = Promise.resolve();
   private unloaded = false;
   private pendingTimeouts = new Set<number>();
+  private stagedSessionTokenToRevoke = "";
 
   onunload(): void {
     this.unloaded = true;
@@ -191,12 +217,25 @@ export default class DocferryPlugin extends Plugin {
       this.manifest.version,
       (error) => this.handleInvalidProductSession(error)
     );
+    await this.reconcileStagedSessionToken();
+    await this.reconcileCommittedSharePublish();
     this.auth = new AuthService(
       this.api,
       async (token, response) => {
         // The exchange may complete after plugin unload: adopt nothing then.
         if (this.unloaded) return;
         this.billingSessionRecoveryUntil = 0;
+        const pendingShare = this.docferrySettings.pendingSharePublish;
+        if (
+          pendingShare &&
+          response.product_subject_id &&
+          pendingShare.ownerProductSubjectId !== response.product_subject_id
+        ) {
+          await this.rejectMismatchedLoginToken(token);
+          throw new AuthCompletionError(
+            "An unfinished share belongs to another Bondie account. Sign in with that account and finish or stop the share first."
+          );
+        }
         const pendingSubmission = this.docferrySettings.pendingMediaNoteSubmission;
         if (
           pendingSubmission &&
@@ -234,21 +273,17 @@ export default class DocferryPlugin extends Plugin {
         }
         const previousToken = this.docferrySettings.sessionToken;
         if (previousToken && previousToken !== token) {
-          // Connect-while-connected: revoke the prior server session before
-          // adopting the new token so old sessions do not linger.
+          await this.replaceSessionToken(previousToken, token);
+        } else {
           try {
-            await this.api.logout();
+            this.adoptSessionToken(token);
           } catch (error) {
-            this.debug("previous session revoke during connect failed", error);
+            this.debug("secure session token adoption failed", error);
+            await this.revokeUnadoptedToken(token);
+            throw new AuthCompletionError(
+              "DocFerry could not store your sign-in securely. Update Obsidian, then start login again."
+            );
           }
-        }
-        try {
-          this.adoptSessionToken(token);
-        } catch (error) {
-          this.debug("secure session token adoption failed", error);
-          throw new AuthCompletionError(
-            "DocFerry could not store your sign-in securely. Update Obsidian, then start login again."
-          );
         }
         this.docferrySettings.connectedAccount = response.product_subject_id
           ? {
@@ -294,6 +329,9 @@ export default class DocferryPlugin extends Plugin {
     this.registerView(DOCFERRY_DASHBOARD_VIEW_TYPE, (leaf) => new DocferryDashboardView(leaf, this));
     this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
       if (file instanceof TFolder) {
+        // Free plans have no folder sharing: hide the entry instead of
+        // leading to a dead-end upgrade notice.
+        if (!canShowFolderShareEntry(this.docferrySettings.membership)) return;
         menu.addItem((item) => item
           .setTitle("Publish folder with DocFerry")
           .setIcon("folder-up")
@@ -384,6 +422,7 @@ export default class DocferryPlugin extends Plugin {
       checkCallback: (checking) => {
         const folder = this.getActiveMarkdownFile()?.parent;
         if (!(folder instanceof TFolder)) return false;
+        if (!canShowFolderShareEntry(this.docferrySettings.membership)) return false;
         if (!checking) void this.publishFolder(folder);
         return true;
       }
@@ -501,6 +540,9 @@ export default class DocferryPlugin extends Plugin {
       })
     );
     this.app.workspace.onLayoutReady(() => {
+      void this.reconcileCommittedSharePublish().catch((error) => {
+        this.debug("pending share journal reconciliation failed", error);
+      });
       if (this.docferrySettings.sessionToken) this.refreshMembershipForDashboardOpen();
       if (this.docferrySettings.sessionToken && this.docferrySettings.pendingMediaNoteImport) {
         this.scheduleTimeout(() => void this.resumeActiveMediaImport(), 900);
@@ -533,6 +575,7 @@ export default class DocferryPlugin extends Plugin {
         boundaryReset
       );
       this.docferrySettings.sessionToken = sessionToken.token;
+      this.stagedSessionTokenToRevoke = sessionToken.stagedTokenToRevoke;
       if (sessionToken.scrubLegacy) changed = true;
       if (boundaryReset) {
         clearPendingLoginCustody(this.app.secretStorage);
@@ -586,7 +629,10 @@ export default class DocferryPlugin extends Plugin {
   async saveSettings(): Promise<void> {
     // The session token lives only in Obsidian SecretStorage and in memory;
     // it is never persisted to data.json.
-    await this.saveData({ ...this.docferrySettings, sessionToken: "" });
+    const snapshot = { ...this.docferrySettings, sessionToken: "" };
+    const save = this.settingsSaveQueue.then(() => this.saveData(snapshot));
+    this.settingsSaveQueue = save.catch(() => undefined);
+    await save;
   }
 
   /**
@@ -597,6 +643,119 @@ export default class DocferryPlugin extends Plugin {
   private adoptSessionToken(token: string): void {
     persistSessionToken(this.app.secretStorage, token);
     this.docferrySettings.sessionToken = token;
+  }
+
+  /**
+   * Switches product sessions with separate active and pending-revocation
+   * SecretStorage slots. The previous token is durably queued before the new
+   * token becomes authoritative. A crash before commit keeps the previous
+   * token; a crash after commit keeps the replacement and revokes the previous
+   * token during startup reconciliation.
+   */
+  private async replaceSessionToken(previousToken: string, replacementToken: string): Promise<void> {
+    try {
+      stageSessionToken(this.app.secretStorage, previousToken);
+      this.stagedSessionTokenToRevoke = previousToken;
+    } catch (error) {
+      this.debug("previous session cleanup staging failed", error);
+      try {
+        await this.revokeUnadoptedToken(replacementToken);
+      } catch (revokeError) {
+        this.debug("replacement session cleanup failed", revokeError);
+      }
+      throw new AuthCompletionError(
+        "DocFerry could not store your sign-in securely. Your previous account remains connected."
+      );
+    }
+
+    try {
+      persistSessionToken(this.app.secretStorage, replacementToken);
+    } catch (error) {
+      this.debug("replacement session commit failed", error);
+      this.stagedSessionTokenToRevoke = "";
+      try {
+        clearStagedSessionToken(this.app.secretStorage);
+      } catch (cleanupError) {
+        // On restart, equal active/staged old tokens are recognized as an
+        // uncommitted switch and the duplicate staging slot is cleared.
+        this.debug("uncommitted session staging cleanup deferred", cleanupError);
+      }
+      try {
+        await this.revokeUnadoptedToken(replacementToken);
+      } catch (revokeError) {
+        this.debug("replacement session cleanup deferred", revokeError);
+      }
+      throw new AuthCompletionError(
+        "DocFerry could not safely store the new sign-in. Your previous account remains connected."
+      );
+    }
+    this.docferrySettings.sessionToken = replacementToken;
+
+    try {
+      await this.api.logoutToken(previousToken);
+    } catch (error) {
+      if (!isInvalidProductSessionError(error)) {
+        // The replacement is already authoritative. Keep the old token in the
+        // durable cleanup slot so an ambiguous response or crash cannot revoke
+        // the newly connected account on restart.
+        this.debug("previous session cleanup deferred", error);
+        new Notice("Your new account is connected. DocFerry will finish closing the previous session when online.", 8000);
+        return;
+      }
+    }
+
+    this.stagedSessionTokenToRevoke = "";
+    try {
+      clearStagedSessionToken(this.app.secretStorage);
+    } catch (error) {
+      // The old token was revoked; an idempotent retry on restart is safe.
+      this.debug("previous session staging cleanup deferred", error);
+    }
+  }
+
+  private async revokeUnadoptedToken(token: string): Promise<void> {
+    // Retain the cleanup target in memory even when SecretStorage itself is
+    // temporarily unavailable. This process can still retry without falsely
+    // claiming that durable cleanup was queued.
+    this.stagedSessionTokenToRevoke = token;
+    let durablyStaged = false;
+    try {
+      stageSessionToken(this.app.secretStorage, token);
+      durablyStaged = true;
+    } catch (error) {
+      this.debug("unadopted session staging failed", error);
+    }
+    try {
+      await this.api.logoutToken(token);
+    } catch (error) {
+      if (!isInvalidProductSessionError(error)) {
+        this.debug("unadopted session token revoke failed", error);
+        throw new AuthCompletionError(
+          durablyStaged
+            ? "DocFerry could not close the unused sign-in. It remains queued for secure cleanup; try again when connected."
+            : "DocFerry could not close the unused sign-in or save a durable cleanup record. Keep Obsidian open and try again."
+        );
+      }
+    }
+    try {
+      clearStagedSessionToken(this.app.secretStorage);
+      this.stagedSessionTokenToRevoke = "";
+    } catch (error) {
+      this.debug("unadopted session staging cleanup deferred", error);
+    }
+  }
+
+  private async reconcileStagedSessionToken(): Promise<boolean> {
+    const token = this.stagedSessionTokenToRevoke;
+    if (!token) return true;
+    try {
+      await this.revokeUnadoptedToken(token);
+      return true;
+    } catch (error) {
+      this.debug("staged session cleanup failed", error);
+      new Notice("DocFerry is still closing an unfinished sign-in. Your current account remains unchanged.", 8000);
+      return false;
+    }
   }
 
   private clearSessionTokenCustody(): void {
@@ -650,45 +809,23 @@ export default class DocferryPlugin extends Plugin {
   }
 
   async startLogin(): Promise<void> {
+    if (!(await this.reconcileStagedSessionToken())) return;
     await this.auth.startLogin();
   }
 
   async startSignup(): Promise<void> {
+    if (!(await this.reconcileStagedSessionToken())) return;
     if (!(await this.finishPendingImportBeforeAccountChange())) return;
-    // Transactional switch: prove the replacement handoff is underway before
-    // revoking the current session, so a browser failure keeps it intact.
-    const opened = await this.auth.startLogin({ signup: true });
-    if (!opened) return;
-    if (!(await this.logoutBeforeAccountChange())) return;
-    this.clearLocalBondieAccount();
-    await this.saveSettings();
-    this.settingTab?.refreshForAuthChange();
-    this.refreshDashboardAuth();
+    // Keep the current account usable until the browser flow succeeds. The
+    // token-adoption callback revokes the old session immediately before it
+    // stores the confirmed replacement.
+    await this.auth.startLogin({ signup: true });
   }
 
   async reconnectAccount(): Promise<void> {
+    if (!(await this.reconcileStagedSessionToken())) return;
     if (!(await this.finishPendingImportBeforeAccountChange())) return;
-    // Transactional switch: prove the replacement handoff is underway before
-    // revoking the current session, so a browser failure keeps it intact.
-    const opened = await this.auth.startLogin({ promptLogin: true });
-    if (!opened) return;
-    if (!(await this.logoutBeforeAccountChange())) return;
-    this.clearLocalBondieAccount();
-    await this.saveSettings();
-    this.settingTab?.refreshForAuthChange();
-    this.refreshDashboardAuth();
-  }
-
-  private async logoutBeforeAccountChange(): Promise<boolean> {
-    if (!this.docferrySettings.sessionToken) return true;
-    try {
-      await this.api.logout();
-      return true;
-    } catch (error) {
-      if (isInvalidProductSessionError(error)) return true;
-      new Notice(this.formatError(error, "Could not switch accounts"));
-      return false;
-    }
+    await this.auth.startLogin({ promptLogin: true });
   }
 
   async disconnectAccount(): Promise<void> {
@@ -723,23 +860,11 @@ export default class DocferryPlugin extends Plugin {
    * previous local session state.
    */
   private async rejectMismatchedLoginToken(token: string): Promise<void> {
-    const previousSessionToken = this.docferrySettings.sessionToken;
-    const previousAccount = this.docferrySettings.connectedAccount;
-    const previousMembership = this.docferrySettings.membership;
-    this.docferrySettings.sessionToken = token;
-    try {
-      await this.api.logout();
-    } catch (error) {
-      this.debug("logout mismatched account session failed", error);
-    } finally {
-      this.docferrySettings.sessionToken = previousSessionToken;
-      this.docferrySettings.connectedAccount = previousAccount;
-      this.docferrySettings.membership = previousMembership;
-      await this.saveSettings();
-    }
+    await this.revokeUnadoptedToken(token);
   }
 
   private async finishPendingImportBeforeAccountChange(): Promise<boolean> {
+    if (!(await this.finishPendingShareBeforeAccountChange())) return false;
     const submission = this.docferrySettings.pendingMediaNoteSubmission;
     if (submission) {
       // A persisted submission may already be a committed (charged) job:
@@ -766,6 +891,62 @@ export default class DocferryPlugin extends Plugin {
     if (!this.docferrySettings.pendingMediaNoteImport) return true;
     new Notice("Finish or cancel the current detailed note before changing Bondie accounts.", 8000);
     return false;
+  }
+
+  private async finishPendingShareBeforeAccountChange(): Promise<boolean> {
+    const pending = this.docferrySettings.pendingSharePublish;
+    if (!pending) return true;
+    const connectedOwner = this.docferrySettings.connectedAccount?.productSubjectId;
+    if (!connectedOwner || pending.ownerProductSubjectId !== connectedOwner) {
+      new Notice(
+        "An unfinished share belongs to another Bondie account. Reconnect that account and finish the share before changing accounts.",
+        8000
+      );
+      return false;
+    }
+
+    const deps = this.sharePublishSubmissionDeps();
+    let response: ShareResponse;
+    try {
+      response = await this.api.resolveShareCreate(pending.key);
+      await deps.store.save({ ...pending, response });
+    } catch (error) {
+      if (
+        error instanceof ShareApiError &&
+        (error.code === "share_idempotency_not_found" || error.code === "share_idempotency_inactive")
+      ) {
+        await finalizeShareCreate(deps.store, pending.key);
+        return true;
+      }
+      new Notice(this.formatError(error, "Could not confirm the unfinished share"), 8000);
+      return false;
+    }
+
+    let file = this.markdownFileByPath(pending.filePath);
+    if (!file && pending.sourceHash) file = await this.findUniqueMarkdownFileBySourceHash(pending.sourceHash);
+    if (file) {
+      await writeShareMeta(this.app, file, response, {
+        passwordEnabled: response.password_enabled,
+        expiresAt: response.expires_at
+      });
+      await finalizeShareCreate(deps.store, pending.key);
+      return true;
+    }
+
+    const confirmed = await confirmStopRecoveredShareBeforeAccountChange(
+      this.app,
+      response.title || "Recovered share",
+      pending.filePath
+    );
+    if (!confirmed) return false;
+    try {
+      await this.api.deleteShare(response.share_id);
+      await finalizeShareCreate(deps.store, pending.key);
+      return true;
+    } catch (error) {
+      new Notice(this.formatError(error, "Could not stop the unfinished share"), 8000);
+      return false;
+    }
   }
 
   private clearLocalBondieAccount(preservePendingImport = false): void {
@@ -971,7 +1152,10 @@ export default class DocferryPlugin extends Plugin {
 
   async updateShareFromList(share: ShareListItemResponse): Promise<void> {
     const vaultId = await this.resolveVaultId();
-    if (!share.vault_id || share.vault_id !== vaultId) {
+    // A share without a recorded vault (CLI/agent-kit created) may be claimed
+    // by this vault when the source note resolves here; only a recorded
+    // mismatching vault id stays rejected.
+    if (resolveShareUpdateVaultGate(share.vault_id, vaultId) === "wrong-vault") {
       new Notice("Open the source vault to update that share.");
       return;
     }
@@ -979,7 +1163,14 @@ export default class DocferryPlugin extends Plugin {
     // unrelated note after the source note was renamed or moved.
     let file = this.findSharedFileByShareId(share.share_id);
     if (!file) {
-      const byPath = this.markdownFileByPath(share.source_path);
+      // Legacy CLI shares remember an absolute path inside the source vault;
+      // try the remembered path as-is, then with the vault prefix stripped.
+      const adapter = this.app.vault.adapter as { basePath?: unknown };
+      const basePath = typeof adapter.basePath === "string" ? adapter.basePath : "";
+      let byPath = this.markdownFileByPath(share.source_path);
+      if (!byPath) {
+        byPath = this.markdownFileByPath(vaultRelativeShareSourcePath(share.source_path, basePath));
+      }
       if (byPath) {
         if (!this.currentShareMeta(byPath).id) {
           // No recorded share on the path match: accept it as the source note
@@ -1002,7 +1193,7 @@ export default class DocferryPlugin extends Plugin {
 
   async updateFolderShareFromList(folderShare: FolderShareResponse): Promise<void> {
     const vaultId = await this.resolveVaultId();
-    if (folderShare.vault_id !== vaultId) {
+    if (resolveShareUpdateVaultGate(folderShare.vault_id, vaultId) === "wrong-vault") {
       new Notice("Open the source vault to update that folder share.");
       return;
     }
@@ -1267,21 +1458,25 @@ export default class DocferryPlugin extends Plugin {
   }
 
   private publishInFlight = new Set<string>();
+  private notePublishInFlight = false;
 
   private async publishFile(file: TFile, selectedShare?: ShareListItemResponse): Promise<void> {
-    if (this.publishInFlight.has(file.path)) {
-      new Notice("This note is already being published. Wait for the current publish to finish.");
+    if (this.notePublishInFlight) {
+      new Notice("Another note is already being published. Wait for it to finish before publishing this note.");
       return;
     }
+    this.notePublishInFlight = true;
     this.publishInFlight.add(file.path);
     try {
       await this.publishFileCore(file, selectedShare);
     } finally {
       this.publishInFlight.delete(file.path);
+      this.notePublishInFlight = false;
     }
   }
 
   private async publishFileCore(file: TFile, selectedShare?: ShareListItemResponse): Promise<void> {
+    await this.reconcileCommittedSharePublish();
     if (!this.docferrySettings.serverUrl) {
       new Notice("Configure server URL first.");
       return;
@@ -1331,10 +1526,10 @@ export default class DocferryPlugin extends Plugin {
     let existingShare: Pick<
       ShareListItemResponse,
       "share_id" | "status" | "password_enabled" | "expires_at" | "theme_mode"
-    > | null = selectedShare ?? null;
-    let existingMetaId = existing.id;
+    > | null = null;
+    let existingMetaId = selectedShare?.share_id ?? existing.id;
     let unreachableShareMeta: LegacyShareMeta | null = null;
-    if (!existingShare && existingMetaId) {
+    if (existingMetaId) {
       // Captured for the catch branch, where the mutable binding can no
       // longer be narrowed after the reassignment inside try.
       const unreachableShareId = existingMetaId;
@@ -1369,14 +1564,21 @@ export default class DocferryPlugin extends Plugin {
       }
     }
     const existingShareId = existingShare?.share_id ?? existingMetaId;
-    const existingExpiresAt = existingShare?.expires_at ?? existing.expires ?? null;
+    // Once the server says the old link is stopped, expired, or missing, its
+    // past expiry must not be copied into a fresh link.
+    const existingExpiresAt = existingShareId
+      ? existingShare?.expires_at ?? existing.expires ?? null
+      : null;
+    const previousPasswordEnabled = Boolean(existingShare?.password_enabled ?? existing.passwordEnabled);
     const title = this.resolveTitle(file);
     const canUseThemeStyling = Boolean(this.docferrySettings.membership?.canUseFullTheme);
     const modal = new ShareModal(this.app, {
       title,
       passwordEnabled:
         existingShare?.password_enabled ?? existing.passwordEnabled ?? this.docferrySettings.defaultPasswordEnabled,
-      passwordAlreadySet: Boolean(existingShare?.password_enabled ?? existing.passwordEnabled),
+      // A stopped, expired, or missing share has no reusable server-side
+      // password even when old frontmatter says it used to be protected.
+      passwordAlreadySet: Boolean(existingShareId && previousPasswordEnabled),
       expiresInDays: initialExpirySelection(existingExpiresAt, this.docferrySettings.defaultExpiresInDays),
       existingExpiresAt,
       isUpdate: Boolean(existingShareId),
@@ -1398,9 +1600,65 @@ export default class DocferryPlugin extends Plugin {
         notice.setMessage(message);
       });
       notice.setMessage(existingShareId ? "Updating share link..." : "Publishing share link...");
-      const response = existingShareId
-        ? await this.updateOrCreateShare(existingShareId, payload, notice)
-        : await this.api.createShare(payload);
+      const shareSubmissionDeps = this.sharePublishSubmissionDeps();
+      const publishResult = existingShareId
+        ? await this.updateOrCreateShare(
+            existingShareId,
+            file.path,
+            payload,
+            resolveFreshExpiryAfterUpdateFallback(
+              options.expirySelection,
+              options.expiresAt,
+              this.docferrySettings.defaultExpiresInDays
+            ),
+            notice,
+            shareSubmissionDeps
+          )
+        : await submitShareCreate(shareSubmissionDeps, {
+            filePath: file.path,
+            payload,
+            payloadHash: await sha256(stableSharePayloadString(payload)),
+            sourceHash: payload.source_hash,
+            ownerProductSubjectId: this.docferrySettings.connectedAccount?.productSubjectId ?? ""
+          });
+      if (!publishResult) {
+        notice.hide();
+        return;
+      }
+      let response = publishResult.response;
+      if ("filePathChanged" in publishResult && publishResult.filePathChanged) {
+        const confirmed = await confirmRecoveredShareReassignment(
+          this.app,
+          publishResult.originalFilePath,
+          options.title,
+          file.path
+        );
+        if (!confirmed) {
+          const stopRecovered = await confirmStopRecoveredShare(
+            this.app,
+            response.title || options.title,
+            publishResult.originalFilePath
+          );
+          if (!stopRecovered) {
+            notice.hide();
+            return;
+          }
+          await this.api.deleteShare(response.share_id);
+          if (publishResult.operationKey) {
+            await finalizeShareCreate(shareSubmissionDeps.store, publishResult.operationKey);
+          }
+          notice.hide();
+          new Notice("The recovered public link was stopped. Publish this note again to create a new link.", 8000);
+          return;
+        }
+      }
+      if ("payloadChanged" in publishResult && publishResult.payloadChanged) {
+        notice.setMessage("Applying your current note and sharing options...");
+        response = await this.api.updateShare(response.share_id, {
+          ...payload,
+          password_mode: options.passwordEnabled ? payload.password_mode : "clear"
+        });
+      }
 
       if (legacyMeta) {
         await preserveLegacyShareMeta(this.app, file, legacyMeta);
@@ -1408,10 +1666,16 @@ export default class DocferryPlugin extends Plugin {
       if (unreachableShareMeta?.url) {
         await preserveLegacyShareMeta(this.app, file, unreachableShareMeta);
       }
+      if ("legacyMeta" in publishResult && publishResult.legacyMeta?.url) {
+        await preserveLegacyShareMeta(this.app, file, publishResult.legacyMeta);
+      }
       await writeShareMeta(this.app, file, response, {
-        passwordEnabled: options.passwordEnabled,
-        expiresAt: options.expiresAt
+        passwordEnabled: response.password_enabled,
+        expiresAt: response.expires_at
       });
+      if (publishResult.operationKey) {
+        await finalizeShareCreate(shareSubmissionDeps.store, publishResult.operationKey);
+      }
       notice.hide();
       try {
         await navigator.clipboard.writeText(response.url);
@@ -1676,7 +1940,7 @@ export default class DocferryPlugin extends Plugin {
       const status = await this.api.getShareStatus(shareId);
       return hasActiveShareLink(status.status) ? "live" : "inactive";
     } catch (error) {
-      if (isStoppedShareError(error)) return "inactive";
+      if (isInactiveShareError(error)) return "inactive";
       if (isMissingShareError(error)) return "missing";
       return "unknown";
     }
@@ -1684,20 +1948,53 @@ export default class DocferryPlugin extends Plugin {
 
   private async updateOrCreateShare(
     shareId: string,
+    filePath: string,
     payload: SharePayload,
-    notice: Notice
-  ): Promise<ShareResponse> {
+    freshExpiresAt: string | null,
+    notice: Notice,
+    submissionDeps: SharePublishSubmissionDeps
+  ): Promise<{ response: ShareResponse; operationKey?: string; legacyMeta?: LegacyShareMeta } | null> {
     try {
-      return await this.api.updateShare(shareId, payload);
+      return { response: await this.api.updateShare(shareId, payload) };
     } catch (error) {
-      if (!(error instanceof ShareApiError) || (!isMissingShareError(error) && !isStoppedShareError(error))) {
+      if (!(error instanceof ShareApiError) || (!isMissingShareError(error) && !isInactiveShareError(error))) {
         throw error;
       }
+      let legacyMeta: LegacyShareMeta | undefined;
+      if (isMissingShareError(error)) {
+        const file = this.markdownFileByPath(filePath);
+        const lastKnownUrl = file ? this.currentShareMeta(file).url ?? "" : "";
+        const confirmed = await confirmUnreachableShareRepublish(
+          this.app,
+          payload.title,
+          filePath,
+          lastKnownUrl
+        );
+        if (!confirmed) return null;
+        legacyMeta = { id: shareId, url: lastKnownUrl };
+      }
       notice.setMessage("The existing share is no longer available. Publishing a new link...");
-      return this.api.createShare({
+      if (payload.password_mode === "keep" && !payload.password) {
+        throw new Error(
+          "The old password cannot be copied to a new link. Publish again and enter a new password to keep this note protected."
+        );
+      }
+      // The fallback create is a create like any other: it must ride the
+      // idempotent submission channel so a lost response followed by a retry
+      // resolves to the same share instead of minting a second public link.
+      const createPayload = {
         ...payload,
+        expires_at: freshExpiresAt,
         password_mode: undefined
+      };
+      const created = await submitShareCreate(submissionDeps, {
+        filePath,
+        payload: createPayload,
+        payloadHash: await sha256(stableSharePayloadString(createPayload)),
+        sourceHash: createPayload.source_hash,
+        ownerProductSubjectId: this.docferrySettings.connectedAccount?.productSubjectId ?? ""
       });
+      return { ...created, legacyMeta };
     }
   }
 
@@ -1766,12 +2063,31 @@ export default class DocferryPlugin extends Plugin {
     return file instanceof TFile && file.extension === "md" ? file : null;
   }
 
+  private async findUniqueMarkdownFileBySourceHash(sourceHash: string): Promise<TFile | null> {
+    const matches: TFile[] = [];
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const markdown = await this.app.vault.cachedRead(file);
+      if (`sha256:${await sha256(markdown)}` !== sourceHash) continue;
+      matches.push(file);
+      if (matches.length > 1) return null;
+    }
+    return matches[0] ?? null;
+  }
+
   /** Locates the vault note whose current-service df_id matches the share, wherever it was moved to. */
   private findSharedFileByShareId(shareId: string): TFile | null {
     for (const file of this.app.vault.getMarkdownFiles()) {
       if (this.currentShareMeta(file).id === shareId) return file;
     }
     return null;
+  }
+
+  /** Clears a journal entry only after its response is already in frontmatter. */
+  private async reconcileCommittedSharePublish(): Promise<void> {
+    const pending = this.docferrySettings.pendingSharePublish;
+    const shareId = pending?.response?.share_id;
+    if (!pending || !shareId || !this.findSharedFileByShareId(shareId)) return;
+    await finalizeShareCreate(this.sharePublishSubmissionDeps().store, pending.key);
   }
 
   private async clearLocalShareMetaForId(shareId: string): Promise<void> {
@@ -1845,6 +2161,9 @@ export default class DocferryPlugin extends Plugin {
     const hasDetailedNoteCapacity = Boolean(
       membership && hasMediaNoteJobCapacity(membership.mediaNoteMonthlyJobsUsed, membership.mediaNoteMonthlyJobLimit)
     );
+    const remainingMonthlyJobs = membership
+      ? mediaNoteMonthlyJobsRemaining(membership.mediaNoteMonthlyJobsUsed, membership.mediaNoteMonthlyJobLimit)
+      : null;
     const prepareDetailedNote = runtimeCanPrepareDetailedNote && hasDetailedNoteCapacity;
     if (!prepareDetailedNote) {
       if (membership?.hasMediaNoteEntitlement && requiresDetailedNoteProvider(linkNote.provider)) {
@@ -1864,6 +2183,17 @@ export default class DocferryPlugin extends Plugin {
     const ownerProductSubjectId = this.docferrySettings.connectedAccount?.productSubjectId;
     if (!ownerProductSubjectId) {
       throw new Error("Reconnect your Bondie account before starting a detailed note.");
+    }
+
+    if (remainingMonthlyJobs !== null && remainingMonthlyJobs <= MEDIA_NOTE_LOW_QUOTA_NOTICE_THRESHOLD) {
+      // Warn before the job consumes one of the last monthly Advanced Import
+      // credits so a low-balance spend is never a surprise.
+      new Notice(
+        remainingMonthlyJobs === 1
+          ? "This will use your last Advanced Import this month."
+          : `This will use 1 of your remaining ${remainingMonthlyJobs} Advanced Imports this month.`,
+        8000
+      );
     }
 
     onProgress?.("starting");
@@ -1976,6 +2306,11 @@ export default class DocferryPlugin extends Plugin {
     completed: MediaNoteJobResponse,
     onProgress?: (progress: MediaNoteProgress) => void
   ): Promise<DashboardImportResult | null> {
+    if (this.docferrySettings.pendingMediaNoteImport?.jobId !== completed.job_id) {
+      // The import was cancelled after the job completed: cancel already
+      // cleared the pending record, so the review step must not run.
+      return null;
+    }
     if (!completed.markdown) {
       await this.clearPendingMediaNoteImport(completed.job_id);
       throw new Error(mediaNoteFailureMessage(completed));
@@ -1986,6 +2321,11 @@ export default class DocferryPlugin extends Plugin {
       // reviewed from the dashboard recovery panel while it lives on the
       // server. Expired jobs are cleared on the next resume attempt.
       new Notice("The note is kept for later review. Resume it from the DocFerry dashboard.", 8000);
+      return null;
+    }
+    if (this.docferrySettings.pendingMediaNoteImport?.jobId !== completed.job_id) {
+      // Cancelled while the review dialog was open: the cancel wins over the
+      // confirmation and nothing is saved.
       return null;
     }
     const pending = this.docferrySettings.pendingMediaNoteImport;
@@ -2019,6 +2359,22 @@ export default class DocferryPlugin extends Plugin {
     if (this.docferrySettings.pendingMediaNoteImport?.jobId !== jobId) return;
     this.docferrySettings.pendingMediaNoteImport = null;
     await this.saveSettings();
+  }
+
+  private sharePublishSubmissionDeps(): SharePublishSubmissionDeps {
+    return {
+      store: {
+        read: () => this.docferrySettings.pendingSharePublish,
+        save: async (record: PendingSharePublish | null) => {
+          this.docferrySettings.pendingSharePublish = record;
+          await this.saveSettings();
+        }
+      },
+      createShare: (payload, key) => this.api.createShare(payload, key),
+      resolveShare: (key) => this.api.resolveShareCreate(key),
+      generateKey: () => mediaNoteIdempotencyKey(),
+      now: () => new Date().toISOString()
+    };
   }
 
   private mediaNoteSubmissionDeps(): MediaNoteSubmissionDeps {
@@ -2375,9 +2731,20 @@ export default class DocferryPlugin extends Plugin {
     const pendingByPath = new Map<string, PendingLocalAsset>();
     const imageAssets: Array<UploadedImageAsset | null> = [];
     const imageAssetPaths: Array<{ targetPath: string; originalPath: string } | null> = [];
+    const skippedUnsafeRefs: string[] = [];
 
     for (const ref of refs) {
+      // Never upload hidden dotfiles (`.obsidian/...`) or traversal paths, no
+      // matter whether the reference resolves inside or outside the vault.
+      if (isUnsafeAssetPath(ref.path)) {
+        skippedUnsafeRefs.push(ref.path);
+        continue;
+      }
       const target = this.resolveLinkedFile(ref.path, sourceFile);
+      if (target && isUnsafeAssetPath(target.path)) {
+        skippedUnsafeRefs.push(ref.path);
+        continue;
+      }
       const contentType = target ? contentTypeForExtension(target.extension) : null;
       const role = target ? assetRoleForExtension(target.extension) : null;
       if (!target || target.extension.toLowerCase() === "md" || !contentType || !role) {
@@ -2400,6 +2767,17 @@ export default class DocferryPlugin extends Plugin {
           originalPath: ref.path
         });
       }
+    }
+
+    if (skippedUnsafeRefs.length) {
+      const listed = skippedUnsafeRefs.slice(0, 3).join(", ");
+      const extra = skippedUnsafeRefs.length > 3 ? ` and ${skippedUnsafeRefs.length - 3} more` : "";
+      new Notice(
+        `DocFerry skipped ${skippedUnsafeRefs.length} hidden or unsafe asset reference${
+          skippedUnsafeRefs.length === 1 ? "" : "s"
+        } (never uploaded): ${listed}${extra}.`,
+        8000
+      );
     }
 
     const pendingAssets = Array.from(pendingByPath.values());

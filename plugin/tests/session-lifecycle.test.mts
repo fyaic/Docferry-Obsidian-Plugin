@@ -14,7 +14,8 @@ function methodBody(source: string, startMarker: string, endMarker: string): str
 }
 
 test("session token never persists to data.json and resolves through SecretStorage at load", () => {
-  assert.match(mainSource, /saveData\(\{ \.\.\.this\.docferrySettings, sessionToken: "" \}\)/);
+  assert.match(mainSource, /const snapshot = \{ \.\.\.this\.docferrySettings, sessionToken: "" \}/);
+  assert.match(mainSource, /this\.settingsSaveQueue\.then\(\(\) => this\.saveData\(snapshot\)\)/);
   assert.match(mainSource, /resolveSessionTokenOnLoad\(\s*this\.app\.secretStorage,/);
   assert.match(mainSource, /could not access secure credential storage\. Update Obsidian/);
   assert.match(mainSource, /import \{[^}]*persistSessionToken[^}]*resolveSessionTokenOnLoad[^}]*\} from "\.\/session-token-custody"/);
@@ -26,27 +27,38 @@ test("logout, disconnect, and invalid-session cleanup clear the SecretStorage to
   assert.match(mainSource, /persistSessionToken\(this\.app\.secretStorage, ""\)/);
 });
 
-test("connect-while-connected revokes the prior server session before adopting the new token", () => {
-  const adoptCall = mainSource.indexOf("this.adoptSessionToken(token);");
+test("connect-while-connected durably queues the old token before committing the replacement", () => {
+  const replaceCall = mainSource.indexOf("await this.replaceSessionToken(previousToken, token);");
   const revokeGuard = mainSource.indexOf("previousToken && previousToken !== token");
   assert.ok(revokeGuard > -1, "previous-session revoke guard must exist");
-  assert.ok(adoptCall > revokeGuard, "revocation must run before token adoption");
-  const between = mainSource.slice(revokeGuard, adoptCall);
-  assert.match(between, /await this\.api\.logout\(\)/);
+  assert.ok(replaceCall > revokeGuard, "replacement transaction must run after the account-change guard");
+  const helper = methodBody(mainSource, "private async replaceSessionToken", "private async revokeUnadoptedToken");
+  const stageIndex = helper.indexOf("stageSessionToken(this.app.secretStorage, previousToken)");
+  const commitIndex = helper.indexOf("persistSessionToken(this.app.secretStorage, replacementToken)");
+  const adoptIndex = helper.indexOf("this.docferrySettings.sessionToken = replacementToken");
+  const revokeIndex = helper.indexOf("await this.api.logoutToken(previousToken)");
+  assert.ok(stageIndex > -1 && commitIndex > stageIndex && adoptIndex > commitIndex && revokeIndex > adoptIndex);
+  assert.match(helper, /clearStagedSessionToken\(this\.app\.secretStorage\)/);
+  assert.match(helper, /this\.stagedSessionTokenToRevoke = ""/);
+  assert.match(helper, /await this\.revokeUnadoptedToken\(replacementToken\)/);
+  assert.match(mainSource, /await this\.reconcileStagedSessionToken\(\)/);
+  assert.match(mainSource, /if \(!\(await this\.reconcileStagedSessionToken\(\)\)\) return;/);
   assert.match(mainSource, /could not store your sign-in securely\. Update Obsidian/);
 });
 
-test("switch account proves the browser handoff before revoking the current session", () => {
+test("switch account keeps the current session until the replacement login completes", () => {
   for (const [start, end] of [
-    ["async reconnectAccount", "private async logoutBeforeAccountChange"],
+    ["async reconnectAccount", "async disconnectAccount"],
     ["async startSignup", "async reconnectAccount"]
   ] as const) {
     const body = methodBody(mainSource, start, end);
-    const loginIndex = body.indexOf("await this.auth.startLogin(");
-    const revokeIndex = body.indexOf("await this.logoutBeforeAccountChange()");
-    assert.ok(loginIndex > -1 && revokeIndex > loginIndex, `${start} must open the login before revoking`);
-    assert.match(body, /if \(!opened\) return;/);
+    assert.match(body, /await this\.auth\.startLogin\(/);
+    assert.doesNotMatch(body, /logoutBeforeAccountChange|clearLocalBondieAccount/);
   }
+  const adoption = methodBody(mainSource, "this.auth = new AuthService", "this.addSettingTab");
+  assert.match(adoption, /await this\.replaceSessionToken\(previousToken, token\)/);
+  const replacement = methodBody(mainSource, "private async replaceSessionToken", "private async revokeUnadoptedToken");
+  assert.match(replacement, /await this\.api\.logoutToken\(previousToken\)/);
 });
 
 test("auth service only starts polling after the browser accepts the handoff", () => {
@@ -58,6 +70,28 @@ test("auth service only starts polling after the browser accepts the handoff", (
   assert.ok(openedIndex > -1 && pollIndex > openedIndex, "polling starts only after a proven browser handoff");
   const failureBranch = startBody.slice(startBody.indexOf("if (!opened)"), pollIndex);
   assert.match(failureBranch, /await this\.clearPendingLogin\(clientState\)/);
+});
+
+test("browser cancellation and rejection terminate private polling immediately", () => {
+  assert.match(authSource, /"auth_login_cancelled"/);
+  assert.match(authSource, /"auth_login_failed"/);
+  const pollBody = methodBody(authSource, "private async pollPendingLogin", "async resumePendingLogin");
+  assert.match(pollBody, /await this\.clearPendingLoginSafely\(clientState\)/);
+  assert.match(pollBody, /Bondie sign-in was cancelled/);
+});
+
+test("business rejection and expired exchange clear persisted PKCE state", () => {
+  const pollBody = methodBody(authSource, "private async pollPendingLogin", "async resumePendingLogin");
+  const completionBranch = pollBody.slice(
+    pollBody.indexOf("if (error instanceof AuthCompletionError)"),
+    pollBody.indexOf('if (error instanceof ShareApiError && error.code === "auth_code_expired")')
+  );
+  assert.match(completionBranch, /await this\.clearPendingLoginSafely\(clientState\)/);
+  const expiredBranch = pollBody.slice(
+    pollBody.indexOf('if (error instanceof ShareApiError && error.code === "auth_code_expired")'),
+    pollBody.indexOf("TERMINAL_EXCHANGE_CODES.has")
+  );
+  assert.match(expiredBranch, /await this\.clearPendingLoginSafely\(clientState\)/);
 });
 
 test("browser handoff reports success or failure instead of fire-and-forget", () => {
@@ -179,13 +213,15 @@ test("login with a different account recovers or protects a bare media note subm
   // An uncertain recovery refuses the account switch and keeps the record.
   assert.match(adoptBody, /pendingSubmission\.ownerProductSubjectId !== response\.product_subject_id/);
   assert.match(adoptBody, /Could not confirm the state of your previous detailed note\. Check your connection, then sign in again\./);
-  // Both mismatch paths revoke the unadopted token through the same helper.
-  assert.equal(adoptBody.match(/await this\.rejectMismatchedLoginToken\(token\)/g)?.length, 2);
+  // Share, bare-submission, and tracked-import mismatches all revoke the
+  // unadopted replacement token through the same helper.
+  assert.equal(adoptBody.match(/await this\.rejectMismatchedLoginToken\(token\)/g)?.length, 3);
+  assert.match(adoptBody, /An unfinished share belongs to another Bondie account/);
   assert.match(adoptBody, /This detailed note belongs to another Bondie account/);
 
   const helperBody = methodBody(mainSource, "private async rejectMismatchedLoginToken", "private async finishPendingImportBeforeAccountChange");
-  assert.match(helperBody, /await this\.api\.logout\(\)/);
-  assert.match(helperBody, /this\.docferrySettings\.sessionToken = previousSessionToken/);
-  assert.match(helperBody, /this\.docferrySettings\.connectedAccount = previousAccount/);
-  assert.match(helperBody, /this\.docferrySettings\.membership = previousMembership/);
+  assert.match(helperBody, /await this\.revokeUnadoptedToken\(token\)/);
+  const revokeBody = methodBody(mainSource, "private async revokeUnadoptedToken", "private clearSessionTokenCustody");
+  assert.match(revokeBody, /await this\.api\.logoutToken\(token\)/);
+  assert.doesNotMatch(revokeBody, /this\.docferrySettings\.sessionToken = token/);
 });

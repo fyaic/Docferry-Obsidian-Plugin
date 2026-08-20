@@ -6,6 +6,7 @@
  */
 
 export const SESSION_TOKEN_SECRET_ID = "session-token";
+export const STAGED_SESSION_TOKEN_SECRET_ID = "staged-session-token";
 
 export interface SessionTokenSecretStore {
   getSecret(id: string): string | null;
@@ -17,6 +18,8 @@ export interface SessionTokenResolution {
   token: string;
   /** True when persisted settings still carry a legacy token to scrub on save. */
   scrubLegacy: boolean;
+  /** Session superseded by a committed switch, or an unused login, to revoke. */
+  stagedTokenToRevoke: string;
 }
 
 /**
@@ -36,20 +39,37 @@ export function resolveSessionTokenOnLoad(
   const legacy = typeof legacyToken === "string" ? legacyToken : "";
   if (boundaryReset) {
     store.setSecret(SESSION_TOKEN_SECRET_ID, "");
-    return { token: "", scrubLegacy: Boolean(legacy) };
+    store.setSecret(STAGED_SESSION_TOKEN_SECRET_ID, "");
+    return { token: "", scrubLegacy: Boolean(legacy), stagedTokenToRevoke: "" };
   }
   const stored = store.getSecret(SESSION_TOKEN_SECRET_ID) || "";
-  if (stored) return { token: stored, scrubLegacy: Boolean(legacy) };
+  let staged = store.getSecret(STAGED_SESSION_TOKEN_SECRET_ID) || "";
+  if (staged && staged === stored) {
+    // A switch staged the old session but crashed before committing the new
+    // active token. The current session is still authoritative, so retain it.
+    store.setSecret(STAGED_SESSION_TOKEN_SECRET_ID, "");
+    staged = "";
+  }
+  if (stored) return { token: stored, scrubLegacy: Boolean(legacy), stagedTokenToRevoke: staged };
   if (legacy) {
     store.setSecret(SESSION_TOKEN_SECRET_ID, legacy);
-    return { token: legacy, scrubLegacy: true };
+    return { token: legacy, scrubLegacy: true, stagedTokenToRevoke: staged };
   }
-  return { token: "", scrubLegacy: false };
+  return { token: "", scrubLegacy: false, stagedTokenToRevoke: staged };
 }
 
 /** Persists the session token; an empty token clears the stored secret. */
 export function persistSessionToken(store: SessionTokenSecretStore, token: string): void {
   store.setSecret(SESSION_TOKEN_SECRET_ID, token);
+}
+
+/** Stores a token that must be revoked after the active-session commit. */
+export function stageSessionToken(store: SessionTokenSecretStore, token: string): void {
+  store.setSecret(STAGED_SESSION_TOKEN_SECRET_ID, token);
+}
+
+export function clearStagedSessionToken(store: SessionTokenSecretStore): void {
+  store.setSecret(STAGED_SESSION_TOKEN_SECRET_ID, "");
 }
 
 export const PENDING_AUTH_STATE_SECRET_ID = "pending-auth-state";

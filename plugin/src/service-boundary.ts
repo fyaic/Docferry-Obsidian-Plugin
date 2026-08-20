@@ -5,6 +5,7 @@ export interface ProductServiceSettings {
   membership: unknown;
   pendingMediaNoteImport: unknown;
   pendingMediaNoteSubmission: unknown;
+  pendingSharePublish: unknown;
 }
 
 export function enforceProductionServiceBoundary(
@@ -19,6 +20,7 @@ export function enforceProductionServiceBoundary(
   settings.membership = null;
   settings.pendingMediaNoteImport = null;
   settings.pendingMediaNoteSubmission = null;
+  settings.pendingSharePublish = null;
   // The pending login handshake lives in SecretStorage; the caller clears
   // that custody on a boundary reset (loadSettings).
   return true;

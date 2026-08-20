@@ -1,6 +1,6 @@
 {
   "name": "docferry-obsidian-plugin",
-  "version": "0.0.67",
+  "version": "0.0.68",
   "private": true,
   "description": "Save public links as notes, publish secure notes, and unlock Pro folder sharing and media summaries.",
   "scripts": {

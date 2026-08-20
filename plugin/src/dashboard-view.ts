@@ -3,6 +3,7 @@ import { ShareApiError } from "./api-client";
 import { appendDocferryLogo, DOCFERRY_PRODUCT_NAME } from "./brand";
 import { externalLinkProvider, validatedExternalImportUrl } from "./external-import";
 import { openExternalUrl } from "./external-links";
+import { canShowFolderShareEntry } from "./folder-share-access";
 import { ImportPasswordModal } from "./import-password-modal";
 import { mediaNoteProgressMessage, type MediaNoteProgress } from "./media-note";
 import { shouldPrepareDetailedNote } from "./media-note-availability";
@@ -197,7 +198,9 @@ export class DocferryDashboardView extends ItemView {
       cls: "docferry-heading docferry-heading-3 docferry-share-drop-title"
     });
     dropCue.createEl("p", {
-      text: "Release a note or folder to review sharing options.",
+      text: canShowFolderShareEntry(this.host.docferrySettings.membership)
+        ? "Release a note or folder to review sharing options."
+        : "Release a note to review sharing options.",
       cls: "docferry-share-drop-detail"
     });
     const dropGuard = dropCue.createDiv({ cls: "docferry-share-drop-guard" });
@@ -405,13 +408,24 @@ export class DocferryDashboardView extends ItemView {
   private updateShareDropCue(surface: HTMLElement, path: string): void {
     const item = this.host.app.vault.getAbstractFileByPath(path);
     const isFolder = item instanceof TFolder;
+    const folderUpgradeRequired = isFolder && !canShowFolderShareEntry(this.host.docferrySettings.membership);
     const displayName = item instanceof TFile ? item.basename : item?.name || path.split("/").pop() || path;
     const icon = surface.querySelector<HTMLElement>(".docferry-share-drop-overlay-icon");
     const title = surface.querySelector<HTMLElement>(".docferry-share-drop-title");
     const detail = surface.querySelector<HTMLElement>(".docferry-share-drop-detail");
     if (icon) setIcon(icon, isFolder ? "folder-up" : "file-up");
-    if (title) title.textContent = isFolder ? "Share this folder" : "Share this note";
-    if (detail) detail.textContent = `Release to review "${displayName}".`;
+    if (title) {
+      title.textContent = folderUpgradeRequired
+        ? "Folder sharing is a Pro feature"
+        : isFolder
+          ? "Share this folder"
+          : "Share this note";
+    }
+    if (detail) {
+      detail.textContent = folderUpgradeRequired
+        ? `Upgrade to share "${displayName}".`
+        : `Release to review "${displayName}".`;
+    }
   }
 
   private renderSharesPage(containerEl: HTMLElement): void {

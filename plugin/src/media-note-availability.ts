@@ -40,3 +40,9 @@ export function requiresDetailedNoteProvider(provider: ExternalLinkProvider): bo
 export function hasMediaNoteJobCapacity(used: number, limit: number | null): boolean {
   return limit === null || used < limit;
 }
+
+export const MEDIA_NOTE_LOW_QUOTA_NOTICE_THRESHOLD = 3;
+
+export function mediaNoteMonthlyJobsRemaining(used: number, limit: number | null): number | null {
+  return limit === null ? null : Math.max(0, limit - used);
+}

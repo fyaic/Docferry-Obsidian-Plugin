@@ -12,7 +12,7 @@ only when you use account, Share, import, or access features.
 | Feature | Default | Local files written | Data sent off device | User control |
 | --- | --- | --- | --- | --- |
 | Account connection | Off until sign-in | Product session and pending-login secrets in Obsidian SecretStorage; display-only account cache in plugin data | Login completion data and low-sensitivity plugin instance context | Disconnect in Preferences or disable the plugin |
-| Publish Share | User-triggered | `df_*` metadata on the selected note | Selected title, body, rendered snapshot, explicitly referenced assets, chosen Share options, and client metadata | Publish only content you choose; stop sharing later |
+| Publish Share | User-triggered | `df_*` metadata on the selected note | Selected title, body, rendered snapshot, explicitly referenced assets (which may upload directly to Tencent Cloud object storage; see below), chosen Share options, and client metadata | Publish only content you choose; stop sharing later |
 | Share management | User-triggered | No note content unless a Share is updated or stopped | Owner-scoped list and status requests | Use Shares or the Dashboard |
 | Import DocFerry Share | User-triggered | Imported note and listed assets in the selected folder | Share URL, optional password, and bounded import requests | Choose the output folder; delete local files at any time |
 | Save ordinary public link | User-triggered | Local Markdown link note | None; the target page is not requested | Delete the local note at any time |
@@ -27,7 +27,10 @@ semantic theme tokens, explicitly referenced local images or attachments,
 title, source-path metadata, and plugin/client version metadata. Theme tokens
 can preserve reviewed colors, borders, radius, text, callout, and code styling;
 DocFerry does not upload an arbitrary theme layout stylesheet. Linked notes are
-not uploaded unless you publish them separately.
+not uploaded unless you publish them separately. Hidden or configuration files
+are never uploaded: asset references whose decoded path contains a dot-prefixed
+segment (such as `.obsidian/...`) or a `..` traversal segment are excluded from
+publishing, and the plugin tells you when it skips such a reference.
 
 Stopping a Share makes its link unavailable, but anyone who previously had
 access may already have viewed or copied the content.
@@ -46,8 +49,9 @@ Share metadata is written to the selected note frontmatter using `df_*` keys.
 An import validates and downloads all listed assets before committing the note;
 if a later write fails, files it would have overwritten are restored.
 
-The bundled upload SDK may use browser local or session storage for temporary
-asset upload state. DocFerry account tokens are not stored there by the plugin.
+The bundled Tencent COS upload SDK may use browser local or session storage
+for temporary asset upload state. DocFerry account tokens are not stored there
+by the plugin.
 
 ## Hosted service
 
@@ -74,6 +78,26 @@ folder identifier, public slug, event type, request ID, HTTP status, salted
 reader-IP hash, bounded user-agent string, and timestamp. Reader IP addresses
 are not stored in plaintext and public readers are not assigned an account
 identity.
+
+## Direct cloud upload
+
+When you publish a note, its explicitly referenced local images and
+attachments (and the optional Pro theme style snapshot) may upload directly
+from your device to Tencent Cloud Object Storage (COS), a third-party storage
+processor. This offloads attachment upload from the DocFerry server. Note text
+is never sent through this path; it goes only to the DocFerry service.
+
+For each direct upload, the DocFerry service issues a temporary Tencent STS
+credential that expires after about 30 minutes, permits upload actions only,
+and is scoped to the single object being uploaded. The plugin uses the
+credential in memory for that upload and never persists it. If direct upload
+is unavailable or fails, the plugin uploads the file through the DocFerry
+server API proxy instead.
+
+Uploaded assets are retained while a Share is live. Stopping a Share blocks
+reader access to its content immediately; stored content is cleared after the
+configured inactive-content period. Unreferenced uploaded assets become
+eligible for deletion after 7 days by default, as described below.
 
 ## Advanced Import and OpenRouter
 

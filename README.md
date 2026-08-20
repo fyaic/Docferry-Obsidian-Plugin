@@ -104,8 +104,10 @@ when you sign in, publish selected content, import a Share, or explicitly submit
 a supported public URL for Advanced Import.
 
 Read [PRIVACY.md](PRIVACY.md) before publishing sensitive content. It explains
-the exact data flows, OpenRouter processing boundary, local state, encryption,
-retention, deletion, clipboard behavior, and payment boundary.
+the exact data flows, the direct Tencent COS upload path with temporary
+credentials and its server-proxy fallback, the OpenRouter processing boundary,
+local state, encryption, retention, deletion, clipboard behavior, and payment
+boundary.
 
 - Hosted service: `https://docferry.bondie.io`
 - Privacy: `https://docferry.bondie.io/privacy`

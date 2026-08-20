@@ -11,6 +11,7 @@ export interface PublishOptions {
   passwordEnabled: boolean;
   password?: string;
   expiresAt?: string | null;
+  expirySelection?: string;
   useThemeStyling: boolean;
 }
 

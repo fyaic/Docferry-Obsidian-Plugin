@@ -1,19 +1,46 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  MEDIA_NOTE_LOW_QUOTA_NOTICE_THRESHOLD,
   canUseMediaNote,
   hasMediaNoteJobCapacity,
+  mediaNoteMonthlyJobsRemaining,
   requiresDetailedNoteProvider,
   shouldPrepareDetailedNote,
   supportsDetailedNoteProvider
 } from "../src/media-note-availability.ts";
+
+const mainSource = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
 
 test("treats a null job limit as unlimited and detects exhausted quotas", () => {
   assert.equal(hasMediaNoteJobCapacity(200, null), true);
   assert.equal(hasMediaNoteJobCapacity(29, 30), true);
   assert.equal(hasMediaNoteJobCapacity(30, 30), false);
   assert.equal(hasMediaNoteJobCapacity(31, 30), false);
+});
+
+test("reports remaining monthly jobs only for bounded plans", () => {
+  assert.equal(mediaNoteMonthlyJobsRemaining(200, null), null);
+  assert.equal(mediaNoteMonthlyJobsRemaining(27, 30), 3);
+  assert.equal(mediaNoteMonthlyJobsRemaining(29, 30), 1);
+  assert.equal(mediaNoteMonthlyJobsRemaining(30, 30), 0);
+});
+
+test("warns before consuming one of the last monthly advanced imports", () => {
+  assert.equal(MEDIA_NOTE_LOW_QUOTA_NOTICE_THRESHOLD, 3);
+  // The notice fires after access checks pass but before the job is created.
+  const importBody = mainSource.slice(
+    mainSource.indexOf("async importExternalLink("),
+    mainSource.indexOf("async cancelActiveMediaImport(")
+  );
+  const noticeIndex = importBody.indexOf("remainingMonthlyJobs <= MEDIA_NOTE_LOW_QUOTA_NOTICE_THRESHOLD");
+  const startIndex = importBody.indexOf('onProgress?.("starting")');
+  assert.ok(noticeIndex > -1, "importExternalLink must check the remaining monthly quota");
+  assert.ok(startIndex > noticeIndex, "the low-quota notice must precede job creation");
+  assert.match(importBody, /This will use your last Advanced Import this month\./);
+  assert.match(importBody, /This will use 1 of your remaining \$\{remainingMonthlyJobs\} Advanced Imports this month\./);
 });
 
 test("requires paid entitlement and an enabled DocFerry runtime", () => {

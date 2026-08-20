@@ -12,6 +12,14 @@ export function isStoppedShareError(error: unknown): boolean {
   return hasStatusAndCode(error, 410, "share_stopped");
 }
 
+export function isExpiredShareError(error: unknown): boolean {
+  return hasStatusAndCode(error, 410, "share_expired");
+}
+
+export function isInactiveShareError(error: unknown): boolean {
+  return isStoppedShareError(error) || isExpiredShareError(error);
+}
+
 function hasStatusAndCode(error: unknown, status: number, code: string): boolean {
   if (!error || typeof error !== "object") return false;
   const record = error as { status?: unknown; code?: unknown };

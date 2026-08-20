@@ -6,12 +6,15 @@ import {
   PENDING_AUTH_STATE_SECRET_ID,
   PENDING_AUTH_VERIFIER_SECRET_ID,
   SESSION_TOKEN_SECRET_ID,
+  STAGED_SESSION_TOKEN_SECRET_ID,
+  clearStagedSessionToken,
   clearPendingLoginCustody,
   migrateLegacyPendingLogin,
   persistPendingLogin,
   persistSessionToken,
   readPendingLogin,
   resolveSessionTokenOnLoad,
+  stageSessionToken,
   type SessionTokenSecretStore
 } from "../src/session-token-custody.ts";
 
@@ -54,8 +57,43 @@ test("a service-boundary reset clears the stored secret instead of migrating", (
 test("no token anywhere resolves to signed-out without writes", () => {
   const store = fakeStore();
   const resolved = resolveSessionTokenOnLoad(store, "", false);
-  assert.deepEqual(resolved, { token: "", scrubLegacy: false });
+  assert.deepEqual(resolved, { token: "", scrubLegacy: false, stagedTokenToRevoke: "" });
   assert.equal(store.values.size, 0);
+});
+
+test("a committed replacement keeps the new active token and returns the old token for revocation", () => {
+  const store = fakeStore({
+    [SESSION_TOKEN_SECRET_ID]: "replacement-token",
+    [STAGED_SESSION_TOKEN_SECRET_ID]: "previous-token"
+  });
+  const resolved = resolveSessionTokenOnLoad(store, "", false);
+  assert.deepEqual(resolved, {
+    token: "replacement-token",
+    scrubLegacy: false,
+    stagedTokenToRevoke: "previous-token"
+  });
+  assert.equal(store.getSecret(SESSION_TOKEN_SECRET_ID), "replacement-token");
+  assert.equal(store.getSecret(STAGED_SESSION_TOKEN_SECRET_ID), "previous-token");
+});
+
+test("a crash before replacement commit keeps the previous active token and clears duplicate staging", () => {
+  const store = fakeStore({
+    [SESSION_TOKEN_SECRET_ID]: "previous-token",
+    [STAGED_SESSION_TOKEN_SECRET_ID]: "previous-token"
+  });
+  const resolved = resolveSessionTokenOnLoad(store, "", false);
+  assert.deepEqual(resolved, { token: "previous-token", scrubLegacy: false, stagedTokenToRevoke: "" });
+  assert.equal(store.getSecret(STAGED_SESSION_TOKEN_SECRET_ID), null);
+});
+
+test("staging helpers never overwrite the active token", () => {
+  const store = fakeStore({ [SESSION_TOKEN_SECRET_ID]: "active-token" });
+  stageSessionToken(store, "previous-token");
+  assert.equal(store.getSecret(SESSION_TOKEN_SECRET_ID), "active-token");
+  assert.equal(store.getSecret(STAGED_SESSION_TOKEN_SECRET_ID), "previous-token");
+  clearStagedSessionToken(store);
+  assert.equal(store.getSecret(SESSION_TOKEN_SECRET_ID), "active-token");
+  assert.equal(store.getSecret(STAGED_SESSION_TOKEN_SECRET_ID), null);
 });
 
 test("persistSessionToken stores and clears the secret with an empty token", () => {
@@ -79,8 +117,14 @@ test("store failures propagate so callers fail closed instead of persisting plai
   assert.throws(() => persistSessionToken(failing, "token"), /unavailable/);
 });
 
-test("pending login secrets use SecretStorage-safe lowercase dashed ids", () => {
-  for (const id of [PENDING_AUTH_STATE_SECRET_ID, PENDING_AUTH_STARTED_AT_SECRET_ID, PENDING_AUTH_VERIFIER_SECRET_ID]) {
+test("session and pending login secrets use SecretStorage-safe lowercase dashed ids", () => {
+  for (const id of [
+    SESSION_TOKEN_SECRET_ID,
+    STAGED_SESSION_TOKEN_SECRET_ID,
+    PENDING_AUTH_STATE_SECRET_ID,
+    PENDING_AUTH_STARTED_AT_SECRET_ID,
+    PENDING_AUTH_VERIFIER_SECRET_ID
+  ]) {
     assert.match(id, /^[a-z0-9-]+$/, `${id} must satisfy the SecretStorage id constraint`);
   }
 });

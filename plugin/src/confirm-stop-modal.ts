@@ -78,6 +78,61 @@ export function confirmLegacyShareMigration(
   });
 }
 
+export function confirmRecoveredShareReassignment(
+  app: App,
+  previousPath: string,
+  currentTitle: string,
+  currentPath: string
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    new ConfirmShareActionModal(
+      app,
+      "Use the recovered link for this note?",
+      "DocFerry recovered a publish that began for a note at a different path. Continuing updates that same public link with the note and sharing options shown now; it does not create a second link.",
+      "Cancel",
+      "Use recovered link",
+      currentTitle,
+      currentPath,
+      resolve,
+      [`Previous path: ${previousPath}`]
+    ).open();
+  });
+}
+
+export function confirmStopRecoveredShareBeforeAccountChange(
+  app: App,
+  title: string,
+  previousPath: string
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    new ConfirmShareActionModal(
+      app,
+      "Stop the unfinished share and change accounts?",
+      "DocFerry recovered a public link but can no longer find its source note in this vault. To avoid leaving an unknown public link behind, changing accounts will stop that link first.",
+      "Keep account connected",
+      "Stop share and continue",
+      title,
+      previousPath,
+      resolve
+    ).open();
+  });
+}
+
+export function confirmStopRecoveredShare(app: App, title: string, previousPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    new ConfirmShareActionModal(
+      app,
+      "Stop the recovered share?",
+      "DocFerry recovered a public link for a note that is no longer at its original path. Stop that link now, then publish the current note again to create a separate link.",
+      "Keep recovered link",
+      "Stop recovered link",
+      title,
+      previousPath,
+      resolve
+    ).open();
+  });
+}
+
 class ConfirmShareActionModal extends Modal {
   private done = false;
 

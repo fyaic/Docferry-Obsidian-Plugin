@@ -66,7 +66,7 @@ test("copy verifies lifecycle state and never copies a known-dead link", () => {
   const verifyBody = methodBody("private async verifyShareLinkState", "private async updateOrCreateShare");
   assert.match(verifyBody, /await this\.api\.getShareStatus\(shareId\)/);
   assert.match(verifyBody, /hasActiveShareLink\(status\.status\) \? "live" : "inactive"/);
-  assert.match(verifyBody, /if \(isStoppedShareError\(error\)\) return "inactive"/);
+  assert.match(verifyBody, /if \(isInactiveShareError\(error\)\) return "inactive"/);
   assert.match(verifyBody, /if \(isMissingShareError\(error\)\) return "missing"/);
 });
 
@@ -90,11 +90,38 @@ test("publish confirms before republishing over an unreachable share and preserv
   assert.match(body, /ownShareId && ownShareId !== selectedShare\.share_id/);
 });
 
-test("update falls back to a fresh link on both 404 share_not_found and 410 share_stopped", () => {
+test("update falls back to a fresh link on missing, stopped, and expired shares", () => {
   const body = methodBody("private async updateOrCreateShare", "private async stopSharing");
-  assert.match(body, /!isMissingShareError\(error\) && !isStoppedShareError\(error\)/);
+  assert.match(body, /!isMissingShareError\(error\) && !isInactiveShareError\(error\)/);
   assert.match(body, /no longer available\. Publishing a new link/);
-  assert.match(body, /return this\.api\.createShare\(/);
+  // The fallback create must ride the idempotent submission channel, not a
+  // bare createShare call: a lost response plus a retry would otherwise mint
+  // a second public link for the same note.
+  assert.match(body, /const created = await submitShareCreate\(submissionDeps, \{/);
+  assert.match(body, /return \{ \.\.\.created, legacyMeta \}/);
+  assert.match(body, /payloadHash: await sha256\(stableSharePayloadString\(createPayload\)\)/);
+  assert.match(body, /payload\.password_mode === "keep" && !payload\.password/);
+  assert.match(body, /expires_at: freshExpiresAt/);
+  const publishBody = methodBody("private async publishFileCore", "private async publishFolder");
+  assert.match(publishBody, /resolveFreshExpiryAfterUpdateFallback\(/);
+  assert.match(publishBody, /options\.expirySelection/);
+  assert.match(body, /old password cannot be copied to a new link/);
+  assert.match(body, /await confirmUnreachableShareRepublish\(/);
+  assert.match(body, /legacyMeta = \{ id: shareId, url: lastKnownUrl \}/);
+  assert.ok(!body.includes("this.api.createShare("), "the fallback must not call createShare directly");
+});
+
+test("share create idempotency is finalized only after frontmatter persistence", () => {
+  const body = methodBody("private async publishFileCore", "private async publishFolder");
+  const writeIndex = body.indexOf("await writeShareMeta(");
+  const finalizeIndex = body.lastIndexOf("await finalizeShareCreate(");
+  assert.ok(writeIndex > -1 && finalizeIndex > writeIndex, "frontmatter must commit before the operation key is cleared");
+  assert.match(body, /passwordAlreadySet: Boolean\(existingShareId && previousPasswordEnabled\)/);
+  assert.match(body, /passwordEnabled: response\.password_enabled/);
+  assert.match(body, /expiresAt: response\.expires_at/);
+  assert.match(mainSource, /private async reconcileCommittedSharePublish\(\)/);
+  assert.match(mainSource, /this\.findSharedFileByShareId\(shareId\)/);
+  assert.match(mainSource, /await finalizeShareCreate\(this\.sharePublishSubmissionDeps\(\)\.store, pending\.key\)/);
 });
 
 test("legacy migration gating in publishFile is preserved", () => {
@@ -106,18 +133,18 @@ test("legacy migration gating in publishFile is preserved", () => {
   assert.ok(preserveIndex > -1 && writeIndex > preserveIndex);
 });
 
-test("concurrent publishes of the same path are serialized by an in-flight guard", () => {
+test("all note publishes are serialized around the single durable journal", () => {
   assert.match(mainSource, /private publishInFlight = new Set<string>\(\)/);
-  for (const [wrapper, core] of [
-    ["private async publishFile(file: TFile", "private async publishFileCore"],
-    ["private async publishFolder(folder: TFolder", "private async publishFolderCore"]
-  ] as const) {
-    const body = methodBody(wrapper, core);
-    assert.match(body, /this\.publishInFlight\.has\(/, `${wrapper} must bail out while a publish is in flight`);
-    assert.match(body, /already being published/);
-    const addIndex = body.indexOf("this.publishInFlight.add(");
-    const finallyIndex = body.indexOf("} finally {");
-    const deleteIndex = body.indexOf("this.publishInFlight.delete(");
-    assert.ok(addIndex > -1 && finallyIndex > addIndex && deleteIndex > finallyIndex, `${wrapper} must release the guard in finally`);
-  }
+  assert.match(mainSource, /private notePublishInFlight = false/);
+  const noteBody = methodBody("private async publishFile(file: TFile", "private async publishFileCore");
+  assert.match(noteBody, /if \(this\.notePublishInFlight\)/);
+  assert.match(noteBody, /Another note is already being published/);
+  const acquireIndex = noteBody.indexOf("this.notePublishInFlight = true");
+  const finallyIndex = noteBody.indexOf("} finally {");
+  const releaseIndex = noteBody.indexOf("this.notePublishInFlight = false");
+  assert.ok(acquireIndex > -1 && finallyIndex > acquireIndex && releaseIndex > finallyIndex);
+
+  const folderBody = methodBody("private async publishFolder(folder: TFolder", "private async publishFolderCore");
+  assert.match(folderBody, /this\.publishInFlight\.has\(/);
+  assert.match(folderBody, /already being published/);
 });

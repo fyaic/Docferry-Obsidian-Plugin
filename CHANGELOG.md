@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.0.68
+
+This corrective release ships the plugin security and reliability fixes
+closed on the paid mainline after the 0.0.67 package was built.
+
+- Filter hidden and traversal-encoded asset references before publishing so a
+  malicious note cannot upload `.obsidian` configuration or files outside the
+  vault, and list what was skipped.
+- Cancel any pending login poll when an account switch's logout fails, so a
+  later poll cannot silently complete a sign-in behind the user's back.
+- Serve the browser confirmation pages that host sign-in and sign-out forms
+  with a same-origin referrer policy so the enforced origin binding accepts
+  real browsers.
+- Require explicit per-device account selection before approval during
+  browser-based login.
+- Make share creation idempotent, including the fallback re-publish used when
+  an existing share disappeared concurrently, so a retry never leaves a
+  duplicate public link.
+- Keep session tokens and pending-login verifiers in Obsidian SecretStorage
+  with lifecycle-safe timers.
+- Hide the Folder Share entry on Free plans and warn before an Advanced
+  Import consumes one of the remaining monthly allowances.
+- Preserve completed Advanced Imports for later review and resolve the
+  cancel-versus-review race on finished import jobs.
+
 ## 0.0.67
 
 - Bind Obsidian browser login completion to its initiating plugin with S256

@@ -131,6 +131,7 @@ export class ShareModal extends Modal {
         passwordEnabled: this.passwordEnabled,
         password: this.passwordEnabled ? this.password : undefined,
         expiresAt: this.resolveExpiresAt(),
+        expirySelection: this.expiresInDays,
         useThemeStyling: this.defaults.canUseThemeStyling && this.useThemeStyling
       });
     });

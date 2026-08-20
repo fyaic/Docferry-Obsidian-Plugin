@@ -33,7 +33,9 @@ const TERMINAL_EXCHANGE_CODES = new Set([
   "pkce_required",
   "code_verifier_required",
   "invalid_code_verifier",
-  "invalid_client_state"
+  "invalid_client_state",
+  "auth_login_cancelled",
+  "auth_login_failed"
 ]);
 
 /** Mirrors the loadSettings wording for a local SecretStorage failure. */
@@ -133,17 +135,23 @@ export class AuthService {
         return;
       } catch (error) {
         if (error instanceof AuthCompletionError) {
+          await this.clearPendingLoginSafely(clientState);
           new Notice(error.userMessage, 8000);
           return;
         }
         if (error instanceof ShareApiError && error.code === "auth_code_expired") {
+          await this.clearPendingLoginSafely(clientState);
           new Notice("Bondie login expired. Start login again.", 8000);
           return;
         }
         if (error instanceof ShareApiError && error.code && TERMINAL_EXCHANGE_CODES.has(error.code)) {
           await this.clearPendingLoginSafely(clientState);
           new Notice(
-            error.code === "pkce_required"
+            error.code === "auth_login_cancelled"
+              ? "Bondie sign-in was cancelled. Your current DocFerry account is still connected."
+              : error.code === "auth_login_failed"
+              ? "Bondie sign-in could not be completed. Your current DocFerry account is still connected."
+              : error.code === "pkce_required"
               ? "This server requires a newer DocFerry login. Update the plugin, then start login again."
               : "Bondie login could not be completed. Start login again.",
             8000

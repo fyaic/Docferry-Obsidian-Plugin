@@ -68,8 +68,16 @@ export class ShareApiClient {
     return this.getJson("/v0/health");
   }
 
-  async createShare(payload: SharePayload): Promise<ShareResponse> {
-    return this.postJson("/v0/shares", payload);
+  async createShare(payload: SharePayload, idempotencyKey?: string): Promise<ShareResponse> {
+    return this.postJson(
+      "/v0/shares",
+      payload,
+      idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}
+    );
+  }
+
+  async resolveShareCreate(idempotencyKey: string): Promise<ShareResponse> {
+    return this.getJson(`/v0/shares/idempotency/${encodeURIComponent(idempotencyKey)}`);
   }
 
   async updateShare(shareId: string, payload: SharePayload): Promise<ShareResponse> {
@@ -299,6 +307,22 @@ export class ShareApiClient {
     return this.postJson("/v0/auth/logout", {});
   }
 
+  /** Revokes a token that has not been adopted into the active plugin session. */
+  async logoutToken(token: string): Promise<{ ok: boolean }> {
+    const res = await requestUrl({
+      url: this.url("/v0/auth/logout"),
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Share-Plugin-Version": this.pluginVersion,
+        Authorization: `Bearer ${token}`
+      },
+      body: "{}",
+      throw: false
+    });
+    return this.parse<{ ok: boolean }>(res.status, res.text, false);
+  }
+
   async getShareImportPayload(shareUrl: string, password?: string): Promise<ShareImportSession> {
     const target = parseDocferryShareUrl(shareUrl, this.getSettings().serverUrl);
     if (!target) {
@@ -412,7 +436,7 @@ export class ShareApiClient {
     return headers;
   }
 
-  private parse<T>(status: number, text: string): T {
+  private parse<T>(status: number, text: string, notifyInvalidSession = true): T {
     let parsed: unknown = undefined;
     if (text) {
       try {
@@ -433,7 +457,7 @@ export class ShareApiClient {
       envelope?.error?.request_id,
       envelope?.error?.details
     );
-    if (isInvalidProductSessionError(error)) this.onInvalidSession?.(error);
+    if (notifyInvalidSession && isInvalidProductSessionError(error)) this.onInvalidSession?.(error);
     throw error;
   }
 }

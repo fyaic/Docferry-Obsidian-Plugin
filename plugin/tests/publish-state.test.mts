@@ -4,7 +4,8 @@ import test from "node:test";
 import {
   initialExpirySelection,
   initialThemeStyling,
-  resolveExpirySelection
+  resolveExpirySelection,
+  resolveFreshExpiryAfterUpdateFallback
 } from "../src/publish-state.ts";
 
 test("preserves an existing expiration until the user changes it", () => {
@@ -21,6 +22,20 @@ test("preserves an existing expiration until the user changes it", () => {
 test("uses configured expiration defaults only for new shares", () => {
   assert.equal(initialExpirySelection(null, "30"), "30");
   assert.equal(initialExpirySelection(undefined, "never"), "never");
+});
+
+test("a replacement link never inherits a future expiry from the dead link", () => {
+  const now = new Date("2026-08-19T10:00:00.000Z");
+  assert.equal(
+    resolveFreshExpiryAfterUpdateFallback("keep", "2026-08-31T10:00:00.000Z", "30", now),
+    "2026-09-18T10:00:00.000Z"
+  );
+  assert.equal(resolveFreshExpiryAfterUpdateFallback("keep", "2026-08-31T10:00:00.000Z", "never", now), null);
+  assert.equal(
+    resolveFreshExpiryAfterUpdateFallback("30", "2026-09-18T10:00:00.000Z", "never", now),
+    "2026-09-18T10:00:00.000Z"
+  );
+  assert.equal(resolveFreshExpiryAfterUpdateFallback("never", null, "30", now), null);
 });
 
 test("preserves reader or full theme mode on update", () => {

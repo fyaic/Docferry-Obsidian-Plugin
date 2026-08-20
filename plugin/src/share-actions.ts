@@ -14,3 +14,21 @@ export function shareListSummary(statuses: readonly ShareStatus[]): string {
 
   return parts.length ? `${parts.join(", ")}.` : "No shares yet.";
 }
+
+// Vault gate for updating an existing share from the share list. A share whose
+// vault_id was never reported (CLI/agent-kit created shares) may be claimed by
+// the vault that owns the source note; a reported mismatch stays rejected.
+export function resolveShareUpdateVaultGate(
+  shareVaultId: string | null | undefined,
+  localVaultId: string
+): "update" | "claim" | "wrong-vault" {
+  if (!shareVaultId) return "claim";
+  return shareVaultId === localVaultId ? "update" : "wrong-vault";
+}
+
+// Legacy CLI shares stored the source path as an absolute path inside the
+// originating vault; strip that prefix so the path resolves vault-relative.
+export function vaultRelativeShareSourcePath(sourcePath: string, vaultBasePath: string): string {
+  const prefix = `${vaultBasePath}/`;
+  return sourcePath.startsWith(prefix) ? sourcePath.slice(prefix.length) : sourcePath;
+}

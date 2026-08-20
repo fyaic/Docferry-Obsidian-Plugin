@@ -1,6 +1,6 @@
 {
   "name": "docferry",
-  "version": "0.0.67",
+  "version": "0.0.68",
   "description": "Save public links as notes, publish secure notes, and unlock Pro folder sharing and media summaries.",
   "main": "main.js",
   "scripts": {

@@ -67,3 +67,21 @@ test("IMPORT-UX-01: cancelling an import whose job is gone clears the record ins
   assert.ok(notFoundIndex > -1 && clearIndex > notFoundIndex, "a 404 during cancel must terminally clear the pending record");
   assert.match(body, /MEDIA_NOTE_TERMINAL_STATUSES\.has\(job\.status\)/);
 });
+
+test("IMPORT-UX-01: a cancel that lands before or during review keeps the review closed", () => {
+  // Race analysis: cancelActiveMediaImport always clears pendingMediaNoteImport
+  // (cancelled, finished, or gone jobs all end in clearPendingMediaNoteImport),
+  // and waitForMediaNote already aborts polling when the record disappears.
+  // The remaining window is after the final poll returns a completed job:
+  // finishMediaNoteImport must re-check the record both before opening the
+  // review dialog and after the user confirms it, so the cancel wins.
+  const body = methodBody(mainSource, "private async finishMediaNoteImport", "private async setPendingMediaNoteImport");
+  const guard = 'if (this.docferrySettings.pendingMediaNoteImport?.jobId !== completed.job_id)';
+  const firstGuard = body.indexOf(guard);
+  const confirmIndex = body.indexOf("await confirmMediaNoteImport(this.app, completed)");
+  const secondGuard = body.indexOf(guard, confirmIndex);
+  const writeIndex = body.indexOf("await this.writeExternalImport(");
+  assert.ok(firstGuard > -1 && firstGuard < confirmIndex, "the pending-record guard must precede the review dialog");
+  assert.ok(secondGuard > confirmIndex, "the pending-record guard must run again after the review dialog resolves");
+  assert.ok(writeIndex > secondGuard, "nothing is written once the cancel cleared the record");
+});

@@ -19,7 +19,7 @@ test("publishFile reads raw share meta and gates on legacy migration before any 
   const detectIndex = publishFileBody.indexOf("legacyShareMetaForService(");
   const modalIndex = publishFileBody.indexOf("await confirmLegacyShareMigration(");
   assert.ok(detectIndex > -1 && modalIndex > detectIndex, "detection must precede the migration modal");
-  for (const laterStep of ["showUploadNoticeIfNeeded(true)", "await this.loadMembership(true)", "createShare(payload)"]) {
+  for (const laterStep of ["showUploadNoticeIfNeeded(true)", "await this.loadMembership(true)", "submitShareCreate(shareSubmissionDeps"]) {
     const stepIndex = publishFileBody.indexOf(laterStep);
     assert.ok(stepIndex > modalIndex, `${laterStep} must run only after the migration decision`);
   }

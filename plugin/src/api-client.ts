@@ -88,8 +88,22 @@ export class ShareApiClient {
     return this.getJson(`/v0/shares/${encodeURIComponent(shareId)}`);
   }
 
-  async listShares(): Promise<ShareListResponse> {
-    return this.getJson("/v0/shares?limit=100");
+  async listShares(limit = 200, offset = 0): Promise<ShareListResponse> {
+    return this.getJson(`/v0/shares?limit=${limit}&offset=${offset}`);
+  }
+
+  async matchSharesBySource(
+    sourcePath: string,
+    sourcePathAliases: readonly string[],
+    acceptedVaultIds: readonly string[],
+    caseInsensitive = false
+  ): Promise<ShareListResponse> {
+    return this.postJson("/v0/shares/source-match", {
+      source_path: sourcePath,
+      source_path_aliases: sourcePathAliases,
+      accepted_vault_ids: acceptedVaultIds,
+      case_insensitive: caseInsensitive
+    });
   }
 
   async getShareLinks(shareId: string): Promise<ShareLinksResponse> {

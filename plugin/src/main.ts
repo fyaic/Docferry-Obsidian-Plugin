@@ -1,12 +1,26 @@
 import { App, Component, MarkdownRenderer, MarkdownView, Notice, Plugin, TFile, TFolder, normalizePath } from "obsidian";
+import { realpath } from "fs/promises";
 import { ShareApiClient, ShareApiError } from "./api-client";
 import { isInvalidProductSessionError } from "./session-errors";
-import { hasActiveShareLink, resolveShareUpdateVaultGate, vaultRelativeShareSourcePath } from "./share-actions";
+import {
+  hasActiveShareLink,
+  continueShareUpdate,
+  resolveShareUpdateVaultGate,
+  expectedVaultIdForClaim,
+  selectExistingNoteShare,
+  selectExistingFolderShare,
+  explicitClaimSourceMatches,
+  resolveRememberedSharePathGate,
+  sourcePathMatchesAliases,
+  vaultRelativeShareSourcePath
+} from "./share-actions";
 import { isInactiveShareError, isMissingShareError } from "./share-lifecycle";
 import { AuthCompletionError, AuthService } from "./auth-service";
 import {
+  confirmClaimShare,
   confirmDeleteShareHistory,
   confirmLegacyShareMigration,
+  confirmMovedShareUpdate,
   confirmRecoveredShareReassignment,
   confirmStopRecoveredShare,
   confirmStopRecoveredShareBeforeAccountChange,
@@ -22,6 +36,10 @@ import { clearShareMeta, preserveLegacyShareMeta, readShareMeta, writeShareMeta 
 import { buildExternalLinkNote, externalLinkProviderLabel } from "./external-import";
 import { openExternalUrl } from "./external-links";
 import { canShowFolderShareEntry, folderShareAccess } from "./folder-share-access";
+import {
+  applyLocalImageAssetPlaceholders as applySnapshotImageAssetPlaceholders,
+  extractLocalAssetRefs as extractLocalAssetRefsFromMarkdown
+} from "./local-image-refs";
 import { FolderShareModal } from "./folder-share-modal";
 import { classifyProtocolCallback } from "./protocol-callback";
 import { confirmLoginToPublish } from "./login-intent-modal";
@@ -92,6 +110,7 @@ import { isRemoteUrl } from "./theme-safety";
 import { isUnsafeAssetPath } from "./asset-path-safety";
 import type {
   FolderShareDocumentPayload,
+  FolderShareDraftPayload,
   FolderShareResponse,
   MediaNoteJobResponse,
   PublishOptions,
@@ -103,6 +122,7 @@ import type {
 import { confirmDocferryUploadNotice } from "./upload-consent-modal";
 import { resolveVaultDragPath } from "./vault-drag";
 import { safeVaultSegment } from "./vault-filename";
+import { buildVaultIdentity, buildVaultSourceAliases } from "./vault-identity";
 
 interface UploadedImageAsset {
   assetId: string;
@@ -579,6 +599,8 @@ export default class DocferryPlugin extends Plugin {
       if (sessionToken.scrubLegacy) changed = true;
       if (boundaryReset) {
         clearPendingLoginCustody(this.app.secretStorage);
+        this.docferrySettings.pendingServiceBoundaryReset = false;
+        changed = true;
       } else if (
         loadedSettings &&
         migrateLegacyPendingLogin(this.app.secretStorage, {
@@ -1151,25 +1173,54 @@ export default class DocferryPlugin extends Plugin {
   }
 
   async updateShareFromList(share: ShareListItemResponse): Promise<void> {
-    const vaultId = await this.resolveVaultId();
+    const { vaultId, legacyVaultIds } = await this.resolveVaultIdentity();
     // A share without a recorded vault (CLI/agent-kit created) may be claimed
     // by this vault when the source note resolves here; only a recorded
     // mismatching vault id stays rejected.
-    if (resolveShareUpdateVaultGate(share.vault_id, vaultId) === "wrong-vault") {
+    const vaultGate = resolveShareUpdateVaultGate(share.vault_id, vaultId, legacyVaultIds);
+    if (vaultGate === "wrong-vault") {
       new Notice("Open the source vault to update that share.");
       return;
     }
     // Resolve by stable identity first: the remembered path may now hold an
     // unrelated note after the source note was renamed or moved.
-    let file = this.findSharedFileByShareId(share.share_id);
+    const linkedFiles = this.sharedFilesByShareId(share.share_id);
+    if (linkedFiles.length > 1) {
+      new Notice(
+        "More than one note contains this share reference. Remove the copied df_id before updating the public link.",
+        8000
+      );
+      return;
+    }
+    let file = linkedFiles[0] ?? null;
     if (!file) {
+      if (vaultGate === "update") {
+        new Notice(
+          "Open the source note before updating this share. DocFerry will not guess from a reused path.",
+          8000
+        );
+        return;
+      }
       // Legacy CLI shares remember an absolute path inside the source vault;
       // try the remembered path as-is, then with the vault prefix stripped.
       const adapter = this.app.vault.adapter as { basePath?: unknown };
       const basePath = typeof adapter.basePath === "string" ? adapter.basePath : "";
+      let resolvedBasePath = basePath;
+      try {
+        if (basePath) resolvedBasePath = await realpath(basePath);
+      } catch {
+        // The raw adapter path remains the only allowed alias.
+      }
       let byPath = this.markdownFileByPath(share.source_path);
       if (!byPath) {
-        byPath = this.markdownFileByPath(vaultRelativeShareSourcePath(share.source_path, basePath));
+        byPath = this.markdownFileByPath(
+          vaultRelativeShareSourcePath(share.source_path, basePath, process.platform === "win32")
+        );
+      }
+      if (!byPath && resolvedBasePath !== basePath) {
+        byPath = this.markdownFileByPath(
+          vaultRelativeShareSourcePath(share.source_path, resolvedBasePath, process.platform === "win32")
+        );
       }
       if (byPath) {
         if (!this.currentShareMeta(byPath).id) {
@@ -1188,21 +1239,80 @@ export default class DocferryPlugin extends Plugin {
       new Notice("Open the source note in this vault to update that share.");
       return;
     }
-    await this.publishFile(file, share);
+    const sourceAliases = await this.resolveVaultSourceAliases(file.path);
+    if (
+      vaultGate === "claim" &&
+      !explicitClaimSourceMatches(
+        share.source_path,
+        file.path,
+        sourceAliases,
+        process.platform === "win32"
+      )
+    ) {
+      new Notice("This historical Share does not belong to this vault's source note.", 8000);
+      return;
+    }
+    await continueShareUpdate(
+      vaultGate,
+      () => confirmClaimShare(this.app, share.title || file.basename, file.path, "note"),
+      () => this.publishFile(file, share, expectedVaultIdForClaim(vaultGate, share.vault_id), share.source_path)
+    );
   }
 
   async updateFolderShareFromList(folderShare: FolderShareResponse): Promise<void> {
-    const vaultId = await this.resolveVaultId();
-    if (resolveShareUpdateVaultGate(folderShare.vault_id, vaultId) === "wrong-vault") {
+    const { vaultId, legacyVaultIds } = await this.resolveVaultIdentity();
+    const vaultGate = resolveShareUpdateVaultGate(folderShare.vault_id, vaultId, legacyVaultIds);
+    if (vaultGate === "wrong-vault") {
       new Notice("Open the source vault to update that folder share.");
       return;
     }
-    const folder = this.app.vault.getAbstractFileByPath(folderShare.source_folder);
+    const adapter = this.app.vault.adapter as { basePath?: unknown };
+    const basePath = typeof adapter.basePath === "string" ? adapter.basePath : "";
+    let resolvedBasePath = basePath;
+    try {
+      if (basePath) resolvedBasePath = await realpath(basePath);
+    } catch {
+      // The raw adapter path remains the only allowed alias.
+    }
+    const isWorkspaceRoot = folderShare.source_folder === this.app.vault.getName()
+      || sourcePathMatchesAliases(folderShare.source_folder, buildVaultSourceAliases(basePath, resolvedBasePath, "."));
+    const relativeFolder = isWorkspaceRoot
+      ? "/"
+      : vaultRelativeShareSourcePath(
+          vaultRelativeShareSourcePath(folderShare.source_folder, basePath, process.platform === "win32"),
+          resolvedBasePath,
+          process.platform === "win32"
+        );
+    const folder = isWorkspaceRoot
+      ? this.app.vault.getRoot()
+      : this.app.vault.getAbstractFileByPath(relativeFolder);
     if (!(folder instanceof TFolder)) {
       new Notice("Open the source folder in this vault to update that share.");
       return;
     }
-    await this.publishFolder(folder);
+    const sourceAliases = await this.resolveVaultSourceAliases(isWorkspaceRoot ? "." : folder.path);
+    if (
+      vaultGate === "claim" &&
+      !explicitClaimSourceMatches(
+        folderShare.source_folder,
+        isWorkspaceRoot ? "." : folder.path,
+        sourceAliases,
+        process.platform === "win32"
+      )
+    ) {
+      new Notice("This historical Folder Share does not belong to this vault's source folder.", 8000);
+      return;
+    }
+    await continueShareUpdate(
+      vaultGate,
+      () => confirmClaimShare(this.app, folderShare.title || folder.name, folder.path, "folder"),
+      () => this.publishFolder(
+        folder,
+        folderShare,
+        expectedVaultIdForClaim(vaultGate, folderShare.vault_id),
+        folderShare.source_folder
+      )
+    );
   }
 
   async stopShareFromList(share: ShareListItemResponse): Promise<void> {
@@ -1460,7 +1570,12 @@ export default class DocferryPlugin extends Plugin {
   private publishInFlight = new Set<string>();
   private notePublishInFlight = false;
 
-  private async publishFile(file: TFile, selectedShare?: ShareListItemResponse): Promise<void> {
+  private async publishFile(
+    file: TFile,
+    selectedShare?: ShareListItemResponse,
+    expectedVaultId?: string | null,
+    expectedSourcePath?: string
+  ): Promise<void> {
     if (this.notePublishInFlight) {
       new Notice("Another note is already being published. Wait for it to finish before publishing this note.");
       return;
@@ -1468,14 +1583,19 @@ export default class DocferryPlugin extends Plugin {
     this.notePublishInFlight = true;
     this.publishInFlight.add(file.path);
     try {
-      await this.publishFileCore(file, selectedShare);
+      await this.publishFileCore(file, selectedShare, expectedVaultId, expectedSourcePath);
     } finally {
       this.publishInFlight.delete(file.path);
       this.notePublishInFlight = false;
     }
   }
 
-  private async publishFileCore(file: TFile, selectedShare?: ShareListItemResponse): Promise<void> {
+  private async publishFileCore(
+    file: TFile,
+    selectedShare?: ShareListItemResponse,
+    expectedVaultId?: string | null,
+    expectedSourcePath?: string
+  ): Promise<void> {
     await this.reconcileCommittedSharePublish();
     if (!this.docferrySettings.serverUrl) {
       new Notice("Configure server URL first.");
@@ -1525,9 +1645,59 @@ export default class DocferryPlugin extends Plugin {
     const existing = this.currentShareMeta(file);
     let existingShare: Pick<
       ShareListItemResponse,
-      "share_id" | "status" | "password_enabled" | "expires_at" | "theme_mode"
+      "share_id" | "vault_id" | "source_path" | "status" | "password_enabled" | "expires_at" | "theme_mode"
     > | null = null;
-    let existingMetaId = selectedShare?.share_id ?? existing.id;
+    let discoveredShare = selectedShare;
+    if (!discoveredShare && !existing.id) {
+      const { vaultId, legacyVaultIds } = await this.resolveVaultIdentity();
+      const acceptedVaultIds = new Set([vaultId, ...legacyVaultIds]);
+      const sourceAliases = await this.resolveVaultSourceAliases(file.path);
+      let ownerShares: ShareListItemResponse[];
+      try {
+        ownerShares = (
+          await this.api.matchSharesBySource(
+            file.path,
+            sourceAliases,
+            [...acceptedVaultIds],
+            process.platform === "win32"
+          )
+        ).shares;
+      } catch (error) {
+        new Notice(this.formatError(error, "Could not inspect existing Shares safely"));
+        return;
+      }
+      const discovered = selectExistingNoteShare(
+        ownerShares,
+        file.path,
+        acceptedVaultIds,
+        (candidate) => candidate.vault_id ? candidate.source_path : file.path,
+        process.platform === "win32"
+      );
+      if (discovered === null) {
+        new Notice("More than one active Share matches this note. Open Shares and choose the link to update.", 8000);
+        return;
+      }
+      discoveredShare = discovered;
+      if (discoveredShare) {
+        const gate = resolveShareUpdateVaultGate(discoveredShare.vault_id, vaultId, legacyVaultIds);
+        if (gate === "wrong-vault") {
+          new Notice("Open the source vault to update that share.");
+          return;
+        }
+        if (gate !== "update") {
+          const confirmed = await confirmClaimShare(
+            this.app,
+            discoveredShare.title || file.basename,
+            file.path,
+            "note"
+          );
+          if (!confirmed) return;
+          expectedVaultId = expectedVaultIdForClaim(gate, discoveredShare.vault_id);
+          expectedSourcePath = discoveredShare.source_path;
+        }
+      }
+    }
+    let existingMetaId = discoveredShare?.share_id ?? existing.id;
     let unreachableShareMeta: LegacyShareMeta | null = null;
     if (existingMetaId) {
       // Captured for the catch branch, where the mutable binding can no
@@ -1538,8 +1708,62 @@ export default class DocferryPlugin extends Plugin {
         if (!hasActiveShareLink(existingShare.status)) {
           // Stopped or expired outside this session: publish a fresh link
           // instead of failing against the dead one.
+          await this.clearLocalShareMetaForId(existingShare.share_id);
           existingShare = null;
           existingMetaId = undefined;
+        } else if (expectedVaultId === undefined) {
+          // Frontmatter can outlive the vault identity contract that created
+          // it. The note menu is the primary update path, so it must perform
+          // the same explicit compare-and-set claim as the Shares page.
+          const { vaultId, legacyVaultIds } = await this.resolveVaultIdentity();
+          const gate = resolveShareUpdateVaultGate(existingShare.vault_id, vaultId, legacyVaultIds);
+          if (gate === "wrong-vault") {
+            new Notice("Open the source vault to update that share.");
+            return;
+          }
+          if (gate === "claim") {
+            // A copied/stale df_share_id is not proof that this note owns a
+            // pre-vault Share. Require the owner to select the remote record
+            // from Shares, where its remembered source is checked before the
+            // explicit compare-and-set claim.
+            new Notice("Open Shares and select this historical link before claiming it for this vault.", 8000);
+            return;
+          }
+          if (gate === "migrate") {
+            const confirmed = await confirmClaimShare(
+              this.app,
+              this.resolveTitle(file),
+              file.path,
+              "note"
+            );
+            if (!confirmed) return;
+            expectedVaultId = expectedVaultIdForClaim(gate, existingShare.vault_id);
+            expectedSourcePath = existingShare.source_path;
+          } else if (gate === "update") {
+            const pathGate = resolveRememberedSharePathGate(
+              existingShare.source_path,
+              file.path,
+              this.sharedFilesByShareId(existingShare.share_id).map((candidate) => candidate.path),
+              process.platform === "win32"
+            );
+            if (pathGate === "ambiguous") {
+              new Notice(
+                "More than one note contains this share reference. Remove the copied df_id before updating the public link.",
+                8000
+              );
+              return;
+            }
+            if (pathGate === "move") {
+              const confirmed = await confirmMovedShareUpdate(
+                this.app,
+                this.resolveTitle(file),
+                file.path,
+                existingShare.source_path
+              );
+              if (!confirmed) return;
+              expectedSourcePath = existingShare.source_path;
+            }
+          }
         }
       } catch (error) {
         if (isInvalidProductSessionError(error)) return;
@@ -1599,6 +1823,13 @@ export default class DocferryPlugin extends Plugin {
       const payload = await this.buildPayload(file, options.title, options, Boolean(existingShareId), (message) => {
         notice.setMessage(message);
       });
+      if (existingShareId && expectedVaultId !== undefined) {
+        if (!expectedSourcePath) throw new Error("The historical Share source changed before it could be claimed.");
+        payload.expected_vault_id = expectedVaultId;
+      }
+      if (existingShareId && expectedSourcePath !== undefined) {
+        payload.expected_source_path = expectedSourcePath;
+      }
       notice.setMessage(existingShareId ? "Updating share link..." : "Publishing share link...");
       const shareSubmissionDeps = this.sharePublishSubmissionDeps();
       const publishResult = existingShareId
@@ -1651,6 +1882,10 @@ export default class DocferryPlugin extends Plugin {
           new Notice("The recovered public link was stopped. Publish this note again to create a new link.", 8000);
           return;
         }
+        // The durable operation remembers the exact source used by the
+        // committed create. A confirmed rename must compare-and-set that old
+        // path so it cannot silently retarget a different public Share.
+        payload.expected_source_path = publishResult.originalFilePath;
       }
       if ("payloadChanged" in publishResult && publishResult.payloadChanged) {
         notice.setMessage("Applying your current note and sharing options...");
@@ -1694,21 +1929,32 @@ export default class DocferryPlugin extends Plugin {
     }
   }
 
-  private async publishFolder(folder: TFolder): Promise<void> {
+  private async publishFolder(
+    folder: TFolder,
+    existingFolderHint?: FolderShareResponse,
+    expectedVaultId?: string | null,
+    expectedSourceFolder?: string
+  ): Promise<void> {
     if (this.publishInFlight.has(folder.path)) {
       new Notice("This folder is already being published. Wait for the current publish to finish.");
       return;
     }
     this.publishInFlight.add(folder.path);
     try {
-      await this.publishFolderCore(folder);
+      await this.publishFolderCore(folder, existingFolderHint, expectedVaultId, expectedSourceFolder);
     } finally {
       this.publishInFlight.delete(folder.path);
     }
   }
 
-  private async publishFolderCore(folder: TFolder): Promise<void> {
-    if (!folder.path || folder.path === "/") {
+  private async publishFolderCore(
+    folder: TFolder,
+    existingFolderHint?: FolderShareResponse,
+    expectedVaultId?: string | null,
+    expectedSourceFolder?: string
+  ): Promise<void> {
+    const isWorkspaceRoot = !folder.path || folder.path === "/";
+    if (isWorkspaceRoot && !existingFolderHint) {
       new Notice("Choose a folder inside the vault instead of the entire vault.");
       return;
     }
@@ -1747,13 +1993,47 @@ export default class DocferryPlugin extends Plugin {
       new Notice(`This folder has ${files.length} notes. Your plan allows ${membership.maxFolderDocumentCount}.`);
       return;
     }
-    const vaultId = await this.resolveVaultId();
-    const existingFolder = (await this.api.listFolderShares()).folder_shares.find((item) =>
-      item.vault_id === vaultId &&
-      item.source_folder === folder.path &&
-      item.status !== "stopped" &&
-      item.status !== "expired"
+    const { vaultId, legacyVaultIds } = await this.resolveVaultIdentity();
+    // A folder share selected from the owner-scoped Shares page is the stable
+    // update target. Keep that id when claiming a legacy/CLI share whose
+    // vault_id was never recorded; path-only discovery would otherwise create
+    // a duplicate share instead of updating and backfilling the vault id.
+    const acceptedVaultIds = new Set([vaultId, ...legacyVaultIds]);
+    const sourceFolder = isWorkspaceRoot
+      ? existingFolderHint?.source_folder || this.app.vault.getName()
+      : folder.path;
+    const sourceAliases = await this.resolveVaultSourceAliases(isWorkspaceRoot ? "." : folder.path);
+    const discoveredFolder = selectExistingFolderShare(
+      existingFolderHint,
+      (await this.api.listFolderShares()).folder_shares,
+      sourceFolder,
+      acceptedVaultIds,
+      process.platform === "win32",
+      sourceAliases
     );
+    if (discoveredFolder === null) {
+      new Notice("More than one active Folder Share matches this folder. Open Shares and choose the link to update.", 8000);
+      return;
+    }
+    const existingFolder = discoveredFolder;
+    if (existingFolder && expectedVaultId === undefined) {
+      const gate = resolveShareUpdateVaultGate(existingFolder.vault_id, vaultId, legacyVaultIds);
+      if (gate === "wrong-vault") {
+        new Notice("Open the source vault to update that folder share.");
+        return;
+      }
+      if (gate !== "update") {
+        const confirmed = await confirmClaimShare(
+          this.app,
+          existingFolder.title || folder.name || this.app.vault.getName(),
+          sourceFolder,
+          "folder"
+        );
+        if (!confirmed) return;
+        expectedVaultId = expectedVaultIdForClaim(gate, existingFolder.vault_id);
+        expectedSourceFolder = existingFolder.source_folder;
+      }
+    }
     if (folderShareAccess(membership, Boolean(existingFolder)) === "limit_reached") {
       new Notice(
         `Your plan allows ${membershipLimitLabel(membership.activeFolderShareLimit)} active folder shares. Stop one before publishing another.`
@@ -1776,10 +2056,10 @@ export default class DocferryPlugin extends Plugin {
 
     const notice = new Notice("Preparing folder share...", 0);
     try {
-      const draft = await this.api.createFolderShareDraft({
+      const draftPayload: FolderShareDraftPayload = {
         folder_share_id: existingFolder?.folder_share_id ?? null,
         vault_id: vaultId,
-        source_folder: folder.path,
+        source_folder: sourceFolder,
         title: options.title,
         expected_document_count: files.length,
         theme_mode: options.useThemeStyling && membership.canUseFullTheme ? "full" : "reader",
@@ -1788,9 +2068,16 @@ export default class DocferryPlugin extends Plugin {
           plugin_id: this.manifest.id,
           plugin_version: this.manifest.version,
           obsidian_version: getObsidianVersion(this.app),
-          vault_name: this.app.vault.getName()
+          vault_name: this.app.vault.getName(),
+          platform: process.platform as "darwin" | "linux" | "win32"
         }
-      });
+      };
+      if (expectedVaultId !== undefined) {
+        if (!expectedSourceFolder) throw new Error("The historical Folder Share source changed before it could be claimed.");
+        draftPayload.expected_vault_id = expectedVaultId;
+        draftPayload.expected_source_folder = expectedSourceFolder;
+      }
+      const draft = await this.api.createFolderShareDraft(draftPayload);
       for (let index = 0; index < files.length; index += 1) {
         const file = files[index];
         notice.setMessage(`Publishing ${index + 1} of ${files.length}: ${file.basename}`);
@@ -1923,7 +2210,7 @@ export default class DocferryPlugin extends Plugin {
       return;
     }
     if (linkState === "inactive") {
-      await clearShareMeta(this.app, file);
+      await this.clearLocalShareMetaForId(meta.id);
       this.refreshDashboardShare();
       new Notice("This share is no longer active. The dead link was not copied; publish again to create a new link.", 8000);
       return;
@@ -1972,6 +2259,8 @@ export default class DocferryPlugin extends Plugin {
         );
         if (!confirmed) return null;
         legacyMeta = { id: shareId, url: lastKnownUrl };
+      } else {
+        await this.clearLocalShareMetaForId(shareId);
       }
       notice.setMessage("The existing share is no longer available. Publishing a new link...");
       if (payload.password_mode === "keep" && !payload.password) {
@@ -1984,6 +2273,8 @@ export default class DocferryPlugin extends Plugin {
       // resolves to the same share instead of minting a second public link.
       const createPayload = {
         ...payload,
+        expected_vault_id: undefined,
+        expected_source_path: undefined,
         expires_at: freshExpiresAt,
         password_mode: undefined
       };
@@ -2009,7 +2300,7 @@ export default class DocferryPlugin extends Plugin {
     const notice = new Notice("Stopping share...", 0);
     try {
       await this.api.deleteShare(meta.id);
-      await clearShareMeta(this.app, file);
+      await this.clearLocalShareMetaForId(meta.id);
       this.refreshDashboardShare();
       notice.hide();
       new Notice("Share stopped. The link is no longer available.");
@@ -2074,12 +2365,16 @@ export default class DocferryPlugin extends Plugin {
     return matches[0] ?? null;
   }
 
-  /** Locates the vault note whose current-service df_id matches the share, wherever it was moved to. */
+  private sharedFilesByShareId(shareId: string): TFile[] {
+    return this.app.vault
+      .getMarkdownFiles()
+      .filter((file) => this.currentShareMeta(file).id === shareId);
+  }
+
+  /** Locates the vault note whose current-service df_id uniquely matches the share. */
   private findSharedFileByShareId(shareId: string): TFile | null {
-    for (const file of this.app.vault.getMarkdownFiles()) {
-      if (this.currentShareMeta(file).id === shareId) return file;
-    }
-    return null;
+    const matches = this.sharedFilesByShareId(shareId);
+    return matches.length === 1 ? matches[0] : null;
   }
 
   /** Clears a journal entry only after its response is already in frontmatter. */
@@ -2091,8 +2386,9 @@ export default class DocferryPlugin extends Plugin {
   }
 
   private async clearLocalShareMetaForId(shareId: string): Promise<void> {
-    const file = this.findSharedFileByShareId(shareId);
-    if (file) await clearShareMeta(this.app, file);
+    for (const file of this.sharedFilesByShareId(shareId)) {
+      await clearShareMeta(this.app, file);
+    }
   }
 
   private currentShareMeta(file: TFile): ReturnType<typeof readShareMeta> {
@@ -2649,7 +2945,8 @@ export default class DocferryPlugin extends Plugin {
         plugin_id: this.manifest.id,
         plugin_version: this.manifest.version,
         obsidian_version: getObsidianVersion(this.app),
-        vault_name: this.app.vault.getName()
+        vault_name: this.app.vault.getName(),
+        platform: process.platform as "darwin" | "linux" | "win32"
       }
     };
   }
@@ -2730,8 +3027,9 @@ export default class DocferryPlugin extends Plugin {
     const refs = this.extractLocalAssetRefs(markdown);
     const pendingByPath = new Map<string, PendingLocalAsset>();
     const imageAssets: Array<UploadedImageAsset | null> = [];
-    const imageAssetPaths: Array<{ targetPath: string; originalPath: string } | null> = [];
+    const imageAssetPaths: Array<{ targetPath: string; originalPath: string }> = [];
     const skippedUnsafeRefs: string[] = [];
+    const skippedUnsupportedEmbeds = new Set<string>();
 
     for (const ref of refs) {
       // Never upload hidden dotfiles (`.obsidian/...`) or traversal paths, no
@@ -2748,7 +3046,9 @@ export default class DocferryPlugin extends Plugin {
       const contentType = target ? contentTypeForExtension(target.extension) : null;
       const role = target ? assetRoleForExtension(target.extension) : null;
       if (!target || target.extension.toLowerCase() === "md" || !contentType || !role) {
-        if (ref.isImage && target && assetRoleForExtension(target.extension) === "image") imageAssetPaths.push(null);
+        if (ref.isImage && target && target.extension.toLowerCase() !== "md") {
+          skippedUnsupportedEmbeds.add(target.extension.toLowerCase());
+        }
         continue;
       }
 
@@ -2779,6 +3079,13 @@ export default class DocferryPlugin extends Plugin {
         8000
       );
     }
+    if (skippedUnsupportedEmbeds.size) {
+      const listed = Array.from(skippedUnsupportedEmbeds).sort().join(", ");
+      new Notice(
+        `DocFerry cannot publish embedded ${listed} files; they will not appear on the shared page.`,
+        8000
+      );
+    }
 
     const pendingAssets = Array.from(pendingByPath.values());
     const linkedAssets = await mapWithConcurrency(pendingAssets, ASSET_UPLOAD_CONCURRENCY, (asset) =>
@@ -2790,10 +3097,6 @@ export default class DocferryPlugin extends Plugin {
     });
 
     for (const ref of imageAssetPaths) {
-      if (!ref) {
-        imageAssets.push(null);
-        continue;
-      }
       const uploaded = uploadedByPath.get(ref.targetPath);
       imageAssets.push(uploaded ? { assetId: uploaded.assetId, originalPath: ref.originalPath } : null);
     }
@@ -2844,21 +3147,10 @@ export default class DocferryPlugin extends Plugin {
     container: HTMLElement,
     imageAssets: Array<UploadedImageAsset | null>
   ): void {
-    if (!imageAssets.length) return;
-    const images = Array.from(container.querySelectorAll("img"));
-    let assetIndex = 0;
-    for (const image of images) {
-      const currentSrc = image.getAttribute("src") || "";
-      if (currentSrc.startsWith("http://") || currentSrc.startsWith("https://") || currentSrc.startsWith("data:")) {
-        continue;
-      }
-      const asset = imageAssets[assetIndex];
-      assetIndex += 1;
-      if (!asset) continue;
-      image.setAttribute("src", `docferry-asset://${asset.assetId}`);
-      image.setAttribute("loading", "lazy");
-      image.setAttribute("decoding", "async");
-    }
+    applySnapshotImageAssetPlaceholders(
+      Array.from(container.querySelectorAll("img, video, audio, source")),
+      imageAssets
+    );
   }
 
   private applyLocalAttachmentPlaceholders(container: HTMLElement, assets: UploadedLocalAsset[]): void {
@@ -2881,26 +3173,7 @@ export default class DocferryPlugin extends Plugin {
   }
 
   private extractLocalAssetRefs(markdown: string): Array<{ path: string; isImage: boolean }> {
-    const refs: Array<{ path: string; isImage: boolean }> = [];
-    const wikiImagePattern = /!\[\[([^\]\n]+)\]\]/g;
-    for (const match of markdown.matchAll(wikiImagePattern)) {
-      const linkpath = match[1].split("|")[0]?.trim();
-      if (linkpath && !isRemoteUrl(linkpath)) refs.push({ path: linkpath, isImage: true });
-    }
-
-    const markdownImagePattern = /!\[[^\]\n]*\]\(([^)\n]+)\)/g;
-    for (const match of markdown.matchAll(markdownImagePattern)) {
-      const linkpath = match[1].split(/\s+["']/)[0]?.trim().replace(/^<|>$/g, "");
-      if (linkpath && !isRemoteUrl(linkpath)) refs.push({ path: linkpath, isImage: true });
-    }
-
-    const markdownLinkPattern = /(?<!!)\[[^\]\n]+\]\(([^)\n]+)\)/g;
-    for (const match of markdown.matchAll(markdownLinkPattern)) {
-      const linkpath = match[1].split(/\s+["']/)[0]?.trim().replace(/^<|>$/g, "");
-      if (linkpath && !isRemoteUrl(linkpath)) refs.push({ path: linkpath, isImage: false });
-    }
-
-    return refs;
+    return extractLocalAssetRefsFromMarkdown(markdown);
   }
 
   private extractOutboundLinks(markdown: string, sourceFile: TFile): OutboundLink[] {
@@ -2959,10 +3232,44 @@ export default class DocferryPlugin extends Plugin {
   }
 
   private async resolveVaultId(): Promise<string> {
+    return (await this.resolveVaultIdentity()).vaultId;
+  }
+
+  private async resolveVaultIdentity(): Promise<{ vaultId: string; legacyVaultIds: string[] }> {
     const adapter = this.app.vault.adapter as { basePath?: unknown };
     const basePath = typeof adapter.basePath === "string" ? adapter.basePath : "";
-    const source = `${this.app.vault.getName()}|${basePath}`;
-    return `vlt_${(await sha256(source)).slice(0, 24)}`;
+    let resolvedBasePath = basePath;
+    if (basePath) {
+      try {
+        resolvedBasePath = await realpath(basePath);
+      } catch {
+        // The adapter remains authoritative if the host cannot resolve an
+        // alias (for example a disconnected volume during startup).
+      }
+    }
+    return buildVaultIdentity(basePath, resolvedBasePath, this.app.vault.getName(), sha256);
+  }
+
+  private async resolveVaultSourceAliases(relativePath: string): Promise<string[]> {
+    const adapter = this.app.vault.adapter as { basePath?: unknown };
+    const basePath = typeof adapter.basePath === "string" ? adapter.basePath : "";
+    if (!basePath) return [];
+    let resolvedBasePath = basePath;
+    let resolvedSourcePath = "";
+    try {
+      resolvedBasePath = await realpath(basePath);
+    } catch {
+      // The raw adapter path remains authoritative when the volume is unavailable.
+    }
+    const rawSourcePath = buildVaultSourceAliases(basePath, basePath, relativePath)[0];
+    if (rawSourcePath) {
+      try {
+        resolvedSourcePath = await realpath(rawSourcePath);
+      } catch {
+        // Missing or virtual files simply omit the physical-file alias.
+      }
+    }
+    return buildVaultSourceAliases(basePath, resolvedBasePath, relativePath, resolvedSourcePath);
   }
 
   private resolvePasswordMode(options: PublishOptions): "keep" | "set" | "clear" {
@@ -3147,6 +3454,10 @@ function contentTypeForExtension(extension: string): string | null {
       return "image/gif";
     case "webp":
       return "image/webp";
+    case "avif":
+      return "image/avif";
+    case "bmp":
+      return "image/bmp";
     case "pdf":
       return "application/pdf";
     case "txt":
@@ -3221,7 +3532,7 @@ async function mapWithConcurrency<T, R>(
 
 function assetRoleForExtension(extension: string): UploadedLocalAsset["role"] | null {
   const normalized = extension.toLowerCase();
-  if (["png", "jpg", "jpeg", "gif", "webp"].includes(normalized)) return "image";
+  if (["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp"].includes(normalized)) return "image";
   if (["mp4", "mov", "webm"].includes(normalized)) return "video";
   if (["otf", "ttf", "woff", "woff2"].includes(normalized)) return "font";
   if (contentTypeForExtension(normalized)) return "attachment";

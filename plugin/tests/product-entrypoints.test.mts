@@ -30,8 +30,16 @@ test("gives disconnected users a visible path into browser login", () => {
 });
 
 test("binds dashboard updates to the selected share and source vault", () => {
-  assert.match(mainSource, /resolveShareUpdateVaultGate\(share\.vault_id, vaultId\) === "wrong-vault"/);
-  assert.match(mainSource, /await this\.publishFile\(file, share\)/);
+  assert.match(mainSource, /resolveShareUpdateVaultGate\(share\.vault_id, vaultId, legacyVaultIds\)/);
+  assert.match(mainSource, /if \(vaultGate === "wrong-vault"\)/);
+  assert.match(
+    mainSource,
+    /\(\) => this\.publishFile\(file, share, expectedVaultIdForClaim\(vaultGate, share\.vault_id\), share\.source_path\)/
+  );
+  assert.match(
+    mainSource,
+    /explicitClaimSourceMatches\([\s\S]*?share\.source_path,[\s\S]*?file\.path,[\s\S]*?sourceAliases/
+  );
   assert.match(mainSource, /const existingShareId = existingShare\?\.share_id \?\? existingMetaId/);
   assert.match(mainSource, /this\.updateOrCreateShare\([\s\S]*?existingShareId,[\s\S]*?file\.path,[\s\S]*?payload,[\s\S]*?resolveFreshExpiryAfterUpdateFallback\(/);
 });
@@ -183,4 +191,17 @@ test("refreshes current product access before routing external links", () => {
   );
   assert.match(mainSource, /hasMediaNoteJobCapacity\(membership\.mediaNoteMonthlyJobsUsed, membership\.mediaNoteMonthlyJobLimit\)/);
   assert.match(mainSource, /requiresDetailedNoteProvider\(linkNote\.provider\)/);
+});
+
+test("account page shows labeled sign-out and account-switch actions", () => {
+  // Sign-out and account switching are the page's primary lifecycle actions
+  // and must be visible buttons, not icon-only menu entries.
+  const body = dashboardSource.slice(
+    dashboardSource.indexOf("private renderAccountQuickActions"),
+    dashboardSource.indexOf("private renderPageHeader")
+  );
+  assert.match(body, /appendButtonLabel\(switchButton, "log-in", "Switch account"\)/);
+  assert.match(body, /await this\.host\.reconnectAccount\(\);/);
+  assert.match(body, /appendButtonLabel\(signOutButton, "log-out", "Sign out"\)/);
+  assert.match(body, /await this\.host\.disconnectAccount\(\);\s*\n\s*this\.resetShares\(\);/);
 });

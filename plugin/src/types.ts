@@ -17,6 +17,8 @@ export interface PublishOptions {
 
 export interface SharePayload {
   vault_id: string | null;
+  expected_vault_id?: string | null;
+  expected_source_path?: string | null;
   source_path: string;
   source_path_normalized: string | null;
   doc_identity: string | null;
@@ -47,6 +49,7 @@ export interface SharePayload {
     plugin_version: string;
     obsidian_version: string;
     vault_name?: string;
+    platform?: "darwin" | "linux" | "win32";
   };
 }
 
@@ -106,6 +109,7 @@ export interface ShareStatusResponse {
   share_id: string;
   slug: string;
   url: string;
+  vault_id?: string | null;
   source_path: string;
   source_hash: string;
   title: string;
@@ -147,6 +151,8 @@ export interface ShareListResponse {
 export interface FolderShareDraftPayload {
   folder_share_id?: string | null;
   vault_id: string | null;
+  expected_vault_id?: string | null;
+  expected_source_folder?: string | null;
   source_folder: string;
   title: string;
   expected_document_count: number;

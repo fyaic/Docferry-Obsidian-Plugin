@@ -19,10 +19,11 @@ test("deleting share history clears the source note's df_* reference in the same
 });
 
 test("local share meta is located by share id across the vault, not by remembered path", () => {
-  const finder = methodBody("private findSharedFileByShareId", "private async clearLocalShareMetaForId");
-  assert.match(finder, /this\.app\.vault\.getMarkdownFiles\(\)/);
+  const finder = methodBody("private sharedFilesByShareId", "private findSharedFileByShareId");
+  assert.match(finder, /this\.app\.vault[\s\S]*?\.getMarkdownFiles\(\)/);
   assert.match(finder, /this\.currentShareMeta\(file\)\.id === shareId/);
   const clearer = methodBody("private async clearLocalShareMetaForId", "private currentShareMeta");
+  assert.match(clearer, /this\.sharedFilesByShareId\(shareId\)/);
   assert.match(clearer, /await clearShareMeta\(this\.app, file\)/);
 });
 
@@ -34,12 +35,21 @@ test("stop from the dashboard clears local meta even when the note was moved", (
   assert.doesNotMatch(body, /markdownFileByPath/);
 });
 
+test("note-menu stop clears every copied local reference after the remote link stops", () => {
+  const body = methodBody("private async stopSharing", "private async ensureCanPublishBeforeUpload");
+  const stopIndex = body.indexOf("await this.api.deleteShare(meta.id);");
+  const clearIndex = body.indexOf("await this.clearLocalShareMetaForId(meta.id);");
+  assert.ok(stopIndex > -1 && clearIndex > stopIndex, "all local copies must be cleared after the remote stop");
+  assert.doesNotMatch(body, /await clearShareMeta\(this\.app, file\)/);
+});
+
 test("update from the dashboard resolves by share id first and never retargets another share's note", () => {
   const body = methodBody("async updateShareFromList", "async updateFolderShareFromList");
-  const byIdIndex = body.indexOf("this.findSharedFileByShareId(share.share_id)");
+  const byIdIndex = body.indexOf("this.sharedFilesByShareId(share.share_id)");
   const byPathIndex = body.indexOf("this.markdownFileByPath(share.source_path)");
   assert.ok(byIdIndex > -1 && byPathIndex > byIdIndex, "share id lookup must precede the remembered path fallback");
   assert.match(body, /linked to a different share/);
+  assert.match(body, /if \(vaultGate === "update"\)[\s\S]*?will not guess from a reused path/);
   assert.doesNotMatch(body, /markdownFileByPath\(share\.source_path\) \?\?/);
 });
 
@@ -49,7 +59,7 @@ test("copy verifies lifecycle state and never copies a known-dead link", () => {
   const copyIndex = body.indexOf("await navigator.clipboard.writeText(meta.url)");
   assert.ok(verifyIndex > -1 && copyIndex > verifyIndex, "verification must precede copying");
   assert.match(body, /linkState === "inactive"/);
-  assert.match(body, /await clearShareMeta\(this\.app, file\)/);
+  assert.match(body, /await this\.clearLocalShareMetaForId\(meta\.id\)/);
   assert.match(body, /dead link was not copied/);
 
   // A 404 is ambiguous (deleted vs. owned by another account): the local
@@ -85,7 +95,7 @@ test("publish confirms before republishing over an unreachable share and preserv
   const writeIndex = body.indexOf("await writeShareMeta(");
   assert.ok(preserveIndex > -1 && writeIndex > preserveIndex, "the unreachable reference must be preserved before df_* is overwritten");
   assert.match(body, /const existingShareId = existingShare\?\.share_id \?\? existingMetaId/);
-  assert.match(body, /"share_id" \| "status" \| "password_enabled" \| "expires_at" \| "theme_mode"/);
+  assert.match(body, /"share_id" \| "vault_id" \| "source_path" \| "status" \| "password_enabled" \| "expires_at" \| "theme_mode"/);
   // A dashboard update must never retarget a note linked to a different share.
   assert.match(body, /ownShareId && ownShareId !== selectedShare\.share_id/);
 });
@@ -102,13 +112,28 @@ test("update falls back to a fresh link on missing, stopped, and expired shares"
   assert.match(body, /payloadHash: await sha256\(stableSharePayloadString\(createPayload\)\)/);
   assert.match(body, /payload\.password_mode === "keep" && !payload\.password/);
   assert.match(body, /expires_at: freshExpiresAt/);
+  assert.match(body, /expected_vault_id: undefined/);
+  assert.match(body, /expected_source_path: undefined/);
   const publishBody = methodBody("private async publishFileCore", "private async publishFolder");
   assert.match(publishBody, /resolveFreshExpiryAfterUpdateFallback\(/);
   assert.match(publishBody, /options\.expirySelection/);
+  assert.match(
+    publishBody,
+    /if \(!hasActiveShareLink\(existingShare\.status\)\)[\s\S]*?await this\.clearLocalShareMetaForId\(existingShare\.share_id\)/
+  );
   assert.match(body, /old password cannot be copied to a new link/);
   assert.match(body, /await confirmUnreachableShareRepublish\(/);
   assert.match(body, /legacyMeta = \{ id: shareId, url: lastKnownUrl \}/);
+  assert.match(body, /else \{[\s\S]*?await this\.clearLocalShareMetaForId\(shareId\)/);
   assert.ok(!body.includes("this.api.createShare("), "the fallback must not call createShare directly");
+});
+
+test("a recovered create response uses the durable old path when the user confirms a rename", () => {
+  const body = methodBody("private async publishFileCore", "private async publishFolder");
+  const confirmIndex = body.indexOf("await confirmRecoveredShareReassignment(");
+  const casIndex = body.indexOf("payload.expected_source_path = publishResult.originalFilePath");
+  const updateIndex = body.indexOf("this.api.updateShare(response.share_id");
+  assert.ok(confirmIndex > -1 && casIndex > confirmIndex && updateIndex > casIndex);
 });
 
 test("share create idempotency is finalized only after frontmatter persistence", () => {
@@ -136,7 +161,7 @@ test("legacy migration gating in publishFile is preserved", () => {
 test("all note publishes are serialized around the single durable journal", () => {
   assert.match(mainSource, /private publishInFlight = new Set<string>\(\)/);
   assert.match(mainSource, /private notePublishInFlight = false/);
-  const noteBody = methodBody("private async publishFile(file: TFile", "private async publishFileCore");
+  const noteBody = methodBody("private async publishFile(", "private async publishFileCore");
   assert.match(noteBody, /if \(this\.notePublishInFlight\)/);
   assert.match(noteBody, /Another note is already being published/);
   const acquireIndex = noteBody.indexOf("this.notePublishInFlight = true");
@@ -144,7 +169,7 @@ test("all note publishes are serialized around the single durable journal", () =
   const releaseIndex = noteBody.indexOf("this.notePublishInFlight = false");
   assert.ok(acquireIndex > -1 && finallyIndex > acquireIndex && releaseIndex > finallyIndex);
 
-  const folderBody = methodBody("private async publishFolder(folder: TFolder", "private async publishFolderCore");
+  const folderBody = methodBody("private async publishFolder(", "private async publishFolderCore");
   assert.match(folderBody, /this\.publishInFlight\.has\(/);
   assert.match(folderBody, /already being published/);
 });

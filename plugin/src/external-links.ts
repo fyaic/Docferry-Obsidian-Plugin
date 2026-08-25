@@ -7,12 +7,12 @@ import { Notice } from "obsidian";
  * so callers can keep pre-handoff state intact.
  */
 export async function openExternalUrl(value: string): Promise<boolean> {
-  const url = new URL(value);
-  if (url.protocol !== "https:") {
-    throw new Error("Only secure web links can be opened externally.");
-  }
-
   try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") {
+      new Notice("DocFerry only opens secure HTTPS links.");
+      return false;
+    }
     await shell.openExternal(url.toString());
     return true;
   } catch {

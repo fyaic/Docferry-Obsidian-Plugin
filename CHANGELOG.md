@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.0.72 (review candidate, not published)
+
+- Let an Obsidian vault explicitly claim and update an older Share created by
+  DocFerry CLI or MCP when that Share predates vault identity metadata.
+- Keep one active Share per account and canonical source across Obsidian, CLI,
+  and MCP while retaining ownership and compare-and-set protections.
+- Publish referenced images, audio, video, and attachments through the same
+  Share pipeline, including supported wiki, Markdown, and raw HTML references.
+- Repair repeated Folder Share images and prevent unresolved references from
+  receiving the wrong uploaded asset.
+- Keep Switch account and Sign out visible on the account page.
+- Present Advanced Import as one Pro capability with 30 accepted jobs per
+  calendar month instead of exposing its one-at-a-time processing safeguard as
+  a separate plan benefit.
+
 ## 0.0.68
 
 This corrective release ships the plugin security and reliability fixes

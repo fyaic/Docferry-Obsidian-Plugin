@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { enforceProductionServiceBoundary } from "../src/service-boundary.ts";
+import { SESSION_TOKEN_SECRET_ID, resolveSessionTokenOnLoad } from "../src/session-token-custody.ts";
 import { shareMetaBelongsToService } from "../src/share-url.ts";
 
 
@@ -40,7 +41,10 @@ test("switching product services clears sessions and owner-scoped pending work",
       sourceUrl: "https://example.com/video",
       ownerProductSubjectId: "retired-owner",
       createdAt: "2026-08-14T00:00:00.000Z"
-    }
+    },
+    pendingSharePublish: null,
+    pendingServiceBoundaryReset: false,
+    serviceBoundaryRevision: 0
   };
 
   assert.equal(enforceProductionServiceBoundary(settings, SERVICE_URL), true);
@@ -50,5 +54,83 @@ test("switching product services clears sessions and owner-scoped pending work",
   assert.equal(settings.membership, null);
   assert.equal(settings.pendingMediaNoteImport, null);
   assert.equal(settings.pendingMediaNoteSubmission, null);
+  assert.equal(settings.pendingServiceBoundaryReset, true);
+  assert.equal(settings.serviceBoundaryRevision, 1);
+  assert.equal(enforceProductionServiceBoundary(settings, SERVICE_URL), true);
+  settings.pendingServiceBoundaryReset = false;
   assert.equal(enforceProductionServiceBoundary(settings, SERVICE_URL), false);
+});
+
+test("an unfinished secure boundary reset remains pending after the URL is normalized", () => {
+  const settings = {
+    serverUrl: SERVICE_URL,
+    sessionToken: "",
+    connectedAccount: null,
+    membership: null,
+    pendingMediaNoteImport: null,
+    pendingMediaNoteSubmission: null,
+    pendingSharePublish: null,
+    pendingServiceBoundaryReset: true,
+    serviceBoundaryRevision: 1
+  };
+  assert.equal(enforceProductionServiceBoundary(settings, SERVICE_URL), true);
+});
+
+test("a failed secure reset retries on the next launch before an old token can load", () => {
+  const settings = {
+    serverUrl: "https://retired.example",
+    sessionToken: "",
+    connectedAccount: null,
+    membership: null,
+    pendingMediaNoteImport: null,
+    pendingMediaNoteSubmission: null,
+    pendingSharePublish: null,
+    pendingServiceBoundaryReset: false,
+    serviceBoundaryRevision: 0
+  };
+  const unavailableStore = {
+    getSecret: () => "retired-token",
+    setSecret: () => {
+      throw new Error("SecretStorage unavailable");
+    }
+  };
+
+  assert.equal(enforceProductionServiceBoundary(settings, SERVICE_URL), true);
+  assert.throws(() => resolveSessionTokenOnLoad(unavailableStore, "", true), /unavailable/);
+  assert.equal(settings.pendingServiceBoundaryReset, true);
+
+  const secrets = new Map([[SESSION_TOKEN_SECRET_ID, "retired-token"]]);
+  const recoveredStore = {
+    getSecret: (id: string) => secrets.get(id) ?? null,
+    setSecret: (id: string, value: string) => value ? secrets.set(id, value) : secrets.delete(id)
+  };
+  assert.equal(enforceProductionServiceBoundary(settings, SERVICE_URL), true);
+  assert.equal(resolveSessionTokenOnLoad(recoveredStore, "", true).token, "");
+  settings.pendingServiceBoundaryReset = false;
+  assert.equal(enforceProductionServiceBoundary(settings, SERVICE_URL), false);
+  assert.equal(secrets.get(SESSION_TOKEN_SECRET_ID), undefined);
+});
+
+test("an upgrade clears a historical token even when an older build already normalized the URL", () => {
+  const settings = {
+    serverUrl: SERVICE_URL,
+    sessionToken: "",
+    connectedAccount: null,
+    membership: null,
+    pendingMediaNoteImport: null,
+    pendingMediaNoteSubmission: null,
+    pendingSharePublish: null,
+    pendingServiceBoundaryReset: false,
+    serviceBoundaryRevision: 0
+  };
+  const secrets = new Map([[SESSION_TOKEN_SECRET_ID, "retired-service-token"]]);
+  const store = {
+    getSecret: (id: string) => secrets.get(id) ?? null,
+    setSecret: (id: string, value: string) => value ? secrets.set(id, value) : secrets.delete(id)
+  };
+
+  assert.equal(enforceProductionServiceBoundary(settings, SERVICE_URL), true);
+  assert.equal(resolveSessionTokenOnLoad(store, "", true).token, "");
+  assert.equal(settings.serviceBoundaryRevision, 1);
+  assert.equal(secrets.get(SESSION_TOKEN_SECRET_ID), undefined);
 });

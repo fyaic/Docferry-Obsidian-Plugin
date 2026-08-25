@@ -8,6 +8,7 @@ import { ImportPasswordModal } from "./import-password-modal";
 import { mediaNoteProgressMessage, type MediaNoteProgress } from "./media-note";
 import { shouldPrepareDetailedNote } from "./media-note-availability";
 import { hasActiveShareLink, shareListSummary } from "./share-actions";
+import { isCurrentRequest } from "./request-freshness";
 import type { DocferrySettings } from "./settings";
 import { parseDocferryShareUrl } from "./share-url";
 import {
@@ -81,6 +82,7 @@ export class DocferryDashboardView extends ItemView {
   private importSuccess = "";
   private dragDepth = 0;
   private activeDragPath = "";
+  private sharesRequestGeneration = 0;
 
   constructor(leaf: WorkspaceLeaf, private readonly host: DashboardHost) {
     super(leaf);
@@ -711,7 +713,22 @@ export class DocferryDashboardView extends ItemView {
     if (!connected) return;
     const dashboardButton = actions.createEl("button", { cls: "mod-cta", attr: { type: "button" } });
     appendButtonLabel(dashboardButton, "layout-dashboard", "Open dashboard");
-    addAsyncClickListener(dashboardButton, async () => this.host.openDashboardHome());
+    addAsyncClickListener(dashboardButton, async () => await this.host.openDashboardHome());
+    // Account lifecycle actions stay visible with labels: sign-out and
+    // account switching answer the page's primary "whose account is this?"
+    // question and must not hide behind an icon-only menu.
+    const switchButton = actions.createEl("button", { attr: { type: "button" } });
+    appendButtonLabel(switchButton, "log-in", "Switch account");
+    addAsyncClickListener(switchButton, async () => {
+      await this.host.reconnectAccount();
+    });
+    const signOutButton = actions.createEl("button", { attr: { type: "button" } });
+    appendButtonLabel(signOutButton, "log-out", "Sign out");
+    addAsyncClickListener(signOutButton, async () => {
+      await this.host.disconnectAccount();
+      this.resetShares();
+      this.render();
+    });
     const moreButton = actions.createEl("button", {
       cls: "docferry-icon-button",
       attr: { type: "button", "aria-label": "More account actions", title: "More account actions" }
@@ -900,29 +917,36 @@ export class DocferryDashboardView extends ItemView {
       this.render();
       return;
     }
+    const requestKey = this.currentShareListKey();
+    const requestGeneration = ++this.sharesRequestGeneration;
     this.sharesLoading = true;
     this.sharesError = "";
-    this.sharesKey = this.currentShareListKey();
+    this.sharesKey = requestKey;
     this.render();
     try {
       const [shares, folderShares] = await Promise.all([
         this.host.listShares(),
         this.host.listFolderShares()
       ]);
+      if (!isCurrentRequest(requestGeneration, this.sharesRequestGeneration, requestKey, this.currentShareListKey())) return;
       this.shares = shares;
       this.folderShares = folderShares;
       this.sharesLoaded = true;
     } catch (error) {
+      if (!isCurrentRequest(requestGeneration, this.sharesRequestGeneration, requestKey, this.currentShareListKey())) return;
       this.sharesError = friendlyShareListError(error);
       this.shares = [];
       this.folderShares = [];
     } finally {
-      this.sharesLoading = false;
-      this.render();
+      if (isCurrentRequest(requestGeneration, this.sharesRequestGeneration, requestKey, this.currentShareListKey())) {
+        this.sharesLoading = false;
+        this.render();
+      }
     }
   }
 
   private resetShares(): void {
+    this.sharesRequestGeneration += 1;
     this.shares = [];
     this.folderShares = [];
     this.sharesLoaded = false;

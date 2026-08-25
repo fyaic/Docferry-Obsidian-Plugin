@@ -73,6 +73,12 @@ export interface DocferrySettings {
   pendingMediaNoteImport: PendingMediaNoteImport | null;
   pendingMediaNoteSubmission: PendingMediaNoteSubmission | null;
   pendingSharePublish: PendingSharePublish | null;
+  // Remains true until every credential slot from a retired service boundary
+  // has been cleared successfully from SecretStorage.
+  pendingServiceBoundaryReset: boolean;
+  // Bumped when an upgrade must clear every credential slot even if an older
+  // build already normalized the visible server URL before secure cleanup.
+  serviceBoundaryRevision: number;
   // The pending login handshake (state, startedAt, PKCE verifier) lives in
   // SecretStorage, never in persisted settings; see session-token-custody.ts.
   clientInstanceId: string;
@@ -92,6 +98,8 @@ export const DEFAULT_SETTINGS: DocferrySettings = {
   pendingMediaNoteImport: null,
   pendingMediaNoteSubmission: null,
   pendingSharePublish: null,
+  pendingServiceBoundaryReset: false,
+  serviceBoundaryRevision: 0,
   clientInstanceId: "",
   defaultPasswordEnabled: false,
   defaultExpiresInDays: "never",

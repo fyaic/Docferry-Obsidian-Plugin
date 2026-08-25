@@ -31,6 +31,47 @@ export function confirmDeleteShareHistory(app: App, title: string, sourcePath?: 
   });
 }
 
+export function confirmClaimShare(
+  app: App,
+  title: string,
+  sourcePath: string | null | undefined,
+  kind: "note" | "folder"
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    new ConfirmShareActionModal(
+      app,
+      "Connect this share to this vault?",
+      `This ${kind} share was created without a source-vault identity. Continue only if the ${kind} shown below is the original source. DocFerry will bind this vault to the existing public link and update it instead of creating a new link.`,
+      "Cancel",
+      "Connect and update",
+      title,
+      sourcePath || "",
+      resolve
+    ).open();
+  });
+}
+
+export function confirmMovedShareUpdate(
+  app: App,
+  title: string,
+  currentPath: string,
+  previousPath: string
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    new ConfirmShareActionModal(
+      app,
+      "Update this link from the moved note?",
+      "The public link remembers a different path in this vault. Continue only if this is the same note after a rename or move. A copied note must be shared with a new link.",
+      "Cancel",
+      "Update moved note",
+      title,
+      currentPath,
+      resolve,
+      [`Previous path: ${previousPath}`]
+    ).open();
+  });
+}
+
 export function confirmUnreachableShareRepublish(
   app: App,
   title: string,

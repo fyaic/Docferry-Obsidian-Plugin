@@ -14,9 +14,11 @@ sign in with a Bondie account in your system browser, and work from one simple
 home page. No server deployment, model key, or provider configuration is
 required.
 
-> **Corrective update:** `0.0.67` hardens the full Bondie-powered product after
-> the `0.0.66` free-to-paid transition while keeping the existing Community
-> plugin ID `docferry`. Existing users should read the
+> **Community review candidate:** `0.0.72` consolidates the full Bondie-powered
+> product after the `0.0.66` free-to-paid transition while keeping the existing
+> Community plugin ID `docferry`. The latest published GitHub Release remains
+> `0.0.68`; `0.0.72` is untagged and awaits product-team review. Existing users
+> should read the
 > [migration guide](docs/MIGRATION-FROM-FREE.md) and sign in again after the
 > update.
 
@@ -73,7 +75,10 @@ advanced hosted processing.
 | Total Folder Share content | No | Up to 50 MiB |
 | Theme styling | No | Yes |
 | Advanced Import | No | 30 accepted jobs per calendar month |
-| Simultaneous Advanced Imports | No | 1 |
+
+Advanced Import runs in the background and processes one item at a time per
+account. This is a reliability and cost-control safeguard, not a separate
+membership benefit.
 
 Monthly and yearly Pro subscriptions provide the same product benefits. Plans,
 billing, receipts, and support open in the DocFerry Dashboard. Personal profile,

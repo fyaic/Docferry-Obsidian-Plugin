@@ -29,6 +29,10 @@ assert(rootManifest.authorUrl === "https://bondie.io", "Public manifest author U
 assert(rootManifest.isDesktopOnly === true, "This release must remain desktop-only");
 assert(!/obsidian/i.test(rootManifest.description), "Manifest description must not include Obsidian");
 assert(rootPackage.license === "MIT", "Public client source must retain the intentional MIT license");
+assert(
+  typeof rootPackage.scripts?.build === "string" && rootPackage.scripts.build.includes("stage-build-artifacts"),
+  "Root build must stage artifacts into dist/ for the Obsidian build verification"
+);
 assert(pluginPackage.license === "MIT", "Packaged client source must retain the intentional MIT license");
 assert(statSync(join(root, "LICENSE")).isFile(), "LICENSE is missing");
 assert(statSync(join(root, `release-notes/${rootManifest.version}.md`)).isFile(), "Release notes are missing");

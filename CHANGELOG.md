@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.0.73
+
+- Resolve the Obsidian Community review warnings from the 0.0.72 scan:
+  host platform detection now uses Obsidian's typed Platform API, the vault
+  path canonicalization keeps a single pinned `realpath` wrapper, and the
+  settings tab implements the declarative settings API so settings appear in
+  global settings search on Obsidian 1.13.0 and later.
+- Replace the deprecated warning button style and raw `document.createElement`
+  call, and clean up duplicate and `!important` modal CSS.
+- Stage build artifacts in `dist/` so the Community build verification finds
+  the bundled `main.js`.
+- Document `fs.realpath` path canonicalization, vault enumeration, and the
+  bundled COS SDK's storage use in PRIVACY.md.
+
 ## 0.0.72 (review candidate, not published)
 
 - Let an Obsidian vault explicitly claim and update an older Share created by

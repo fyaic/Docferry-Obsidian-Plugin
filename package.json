@@ -1,10 +1,10 @@
 {
   "name": "docferry-obsidian-plugin",
-  "version": "0.0.72",
+  "version": "0.0.73",
   "private": true,
   "description": "Save public links as notes, publish secure notes, and unlock Pro folder sharing and media summaries.",
   "scripts": {
-    "build": "npm --prefix plugin run build",
+    "build": "npm --prefix plugin run build && node scripts/stage-build-artifacts.mjs",
     "dev": "npm --prefix plugin run dev",
     "lint": "eslint plugin/src",
     "test:plugin": "npm --prefix plugin test",

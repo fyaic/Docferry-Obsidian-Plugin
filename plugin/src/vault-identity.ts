@@ -1,6 +1,8 @@
+import type { HostPlatform } from "./host-platform";
+
 export type VaultIdentityHasher = (value: string) => Promise<string>;
 
-export function canonicalVaultPath(value: string, platform: NodeJS.Platform = process.platform): string {
+export function canonicalVaultPath(value: string, platform: HostPlatform): string {
   let normalized = value.replace(/\\/g, "/").replace(/\/+$/, "").normalize("NFC");
   if (platform === "win32") normalized = normalized.toLocaleLowerCase("en-US");
   return normalized;
@@ -16,7 +18,7 @@ export async function buildVaultIdentity(
   resolvedBasePath: string,
   previousVaultName: string,
   hash: VaultIdentityHasher,
-  platform: NodeJS.Platform = process.platform
+  platform: HostPlatform
 ): Promise<{ vaultId: string; legacyVaultIds: string[] }> {
   const canonicalPath = canonicalVaultPath(resolvedBasePath || rawBasePath, platform);
   const canonicalName = canonicalVaultName(canonicalPath) || previousVaultName.normalize("NFC");

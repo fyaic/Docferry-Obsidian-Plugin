@@ -21,8 +21,6 @@ export default [
       },
     },
     rules: {
-      "@typescript-eslint/no-deprecated": "off",
-      "@typescript-eslint/no-misused-promises": ["error", { checksVoidReturn: false }],
       "obsidianmd/ui/sentence-case": "off",
     },
   },

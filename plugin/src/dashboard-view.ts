@@ -575,7 +575,9 @@ export class DocferryDashboardView extends ItemView {
       });
       const openButton = actions.createEl("button", { attr: { type: "button", "aria-label": "Open folder share" } });
       appendButtonLabel(openButton, "external-link", "Open");
-      openButton.addEventListener("click", () => openExternalUrl(folderShare.url));
+      openButton.addEventListener("click", () => {
+        void openExternalUrl(folderShare.url);
+      });
       const updateButton = actions.createEl("button", { attr: { type: "button", "aria-label": "Update folder share" } });
       appendButtonLabel(updateButton, "upload-cloud", "Update");
       addAsyncClickListener(updateButton, async () => {

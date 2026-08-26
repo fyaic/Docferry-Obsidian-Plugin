@@ -1,5 +1,6 @@
 import { App, Component, MarkdownRenderer, MarkdownView, Notice, Plugin, TFile, TFolder, normalizePath } from "obsidian";
-import { realpath } from "fs/promises";
+import { realpath } from "./node-realpath";
+import { hostPlatform, isWindowsHost } from "./host-platform";
 import { ShareApiClient, ShareApiError } from "./api-client";
 import { isInvalidProductSessionError } from "./session-errors";
 import {
@@ -1214,12 +1215,12 @@ export default class DocferryPlugin extends Plugin {
       let byPath = this.markdownFileByPath(share.source_path);
       if (!byPath) {
         byPath = this.markdownFileByPath(
-          vaultRelativeShareSourcePath(share.source_path, basePath, process.platform === "win32")
+          vaultRelativeShareSourcePath(share.source_path, basePath, isWindowsHost())
         );
       }
       if (!byPath && resolvedBasePath !== basePath) {
         byPath = this.markdownFileByPath(
-          vaultRelativeShareSourcePath(share.source_path, resolvedBasePath, process.platform === "win32")
+          vaultRelativeShareSourcePath(share.source_path, resolvedBasePath, isWindowsHost())
         );
       }
       if (byPath) {
@@ -1246,7 +1247,7 @@ export default class DocferryPlugin extends Plugin {
         share.source_path,
         file.path,
         sourceAliases,
-        process.platform === "win32"
+        isWindowsHost()
       )
     ) {
       new Notice("This historical Share does not belong to this vault's source note.", 8000);
@@ -1279,9 +1280,9 @@ export default class DocferryPlugin extends Plugin {
     const relativeFolder = isWorkspaceRoot
       ? "/"
       : vaultRelativeShareSourcePath(
-          vaultRelativeShareSourcePath(folderShare.source_folder, basePath, process.platform === "win32"),
+          vaultRelativeShareSourcePath(folderShare.source_folder, basePath, isWindowsHost()),
           resolvedBasePath,
-          process.platform === "win32"
+          isWindowsHost()
         );
     const folder = isWorkspaceRoot
       ? this.app.vault.getRoot()
@@ -1297,7 +1298,7 @@ export default class DocferryPlugin extends Plugin {
         folderShare.source_folder,
         isWorkspaceRoot ? "." : folder.path,
         sourceAliases,
-        process.platform === "win32"
+        isWindowsHost()
       )
     ) {
       new Notice("This historical Folder Share does not belong to this vault's source folder.", 8000);
@@ -1659,7 +1660,7 @@ export default class DocferryPlugin extends Plugin {
             file.path,
             sourceAliases,
             [...acceptedVaultIds],
-            process.platform === "win32"
+            isWindowsHost()
           )
         ).shares;
       } catch (error) {
@@ -1671,7 +1672,7 @@ export default class DocferryPlugin extends Plugin {
         file.path,
         acceptedVaultIds,
         (candidate) => candidate.vault_id ? candidate.source_path : file.path,
-        process.platform === "win32"
+        isWindowsHost()
       );
       if (discovered === null) {
         new Notice("More than one active Share matches this note. Open Shares and choose the link to update.", 8000);
@@ -1744,7 +1745,7 @@ export default class DocferryPlugin extends Plugin {
               existingShare.source_path,
               file.path,
               this.sharedFilesByShareId(existingShare.share_id).map((candidate) => candidate.path),
-              process.platform === "win32"
+              isWindowsHost()
             );
             if (pathGate === "ambiguous") {
               new Notice(
@@ -2008,7 +2009,7 @@ export default class DocferryPlugin extends Plugin {
       (await this.api.listFolderShares()).folder_shares,
       sourceFolder,
       acceptedVaultIds,
-      process.platform === "win32",
+      isWindowsHost(),
       sourceAliases
     );
     if (discoveredFolder === null) {
@@ -2069,7 +2070,7 @@ export default class DocferryPlugin extends Plugin {
           plugin_version: this.manifest.version,
           obsidian_version: getObsidianVersion(this.app),
           vault_name: this.app.vault.getName(),
-          platform: process.platform as "darwin" | "linux" | "win32"
+          platform: hostPlatform()
         }
       };
       if (expectedVaultId !== undefined) {
@@ -2946,7 +2947,7 @@ export default class DocferryPlugin extends Plugin {
         plugin_version: this.manifest.version,
         obsidian_version: getObsidianVersion(this.app),
         vault_name: this.app.vault.getName(),
-        platform: process.platform as "darwin" | "linux" | "win32"
+        platform: hostPlatform()
       }
     };
   }
@@ -2984,9 +2985,8 @@ export default class DocferryPlugin extends Plugin {
     useFullTheme: boolean
   ): Promise<HtmlSnapshotResult | null> {
     const doc = currentDocument();
-    const container = doc.createElement("div");
+    const container = doc.body.createDiv();
     container.className = "markdown-preview-view markdown-rendered docferry-snapshot-source docferry-snapshot-hidden-host";
-    doc.body.appendChild(container);
     const renderContext = new Component();
     renderContext.load();
 
@@ -3247,7 +3247,7 @@ export default class DocferryPlugin extends Plugin {
         // alias (for example a disconnected volume during startup).
       }
     }
-    return buildVaultIdentity(basePath, resolvedBasePath, this.app.vault.getName(), sha256);
+    return buildVaultIdentity(basePath, resolvedBasePath, this.app.vault.getName(), sha256, hostPlatform());
   }
 
   private async resolveVaultSourceAliases(relativePath: string): Promise<string[]> {

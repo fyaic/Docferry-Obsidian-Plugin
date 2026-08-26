@@ -2604,7 +2604,6 @@
 .docferry-upload-consent-modal,
 .docferry-result-modal {
   max-height: min(86vh, 720px);
-  max-height: min(86dvh, 720px);
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -3324,9 +3323,10 @@
   min-height: 54px;
 }
 
-.docferry-connection-panel {
+/* Specificity (0,2,0) beats the single-column reset above, no priority flag needed. */
+.docferry-settings-tab .docferry-connection-panel {
   border-top: 1px solid var(--df-product-line);
-  padding-top: 24px !important;
+  padding-top: 24px;
 }
 
 .docferry-settings-connection-card {

@@ -1,4 +1,4 @@
-import { App, Notice, Plugin, PluginSettingTab, Setting, setIcon } from "obsidian";
+import { App, Notice, Plugin, PluginSettingTab, Setting, setIcon, type SettingDefinitionItem } from "obsidian";
 import { DOCFERRY_PRODUCT_DESCRIPTION, DOCFERRY_PRODUCT_NAME, renderDocferryHeader } from "./brand";
 import { canUseMediaNote } from "./media-note-availability";
 import type { PendingMediaNoteSubmission } from "./media-note-submission";
@@ -145,6 +145,88 @@ export class DocferrySettingTab extends PluginSettingTab {
   display(): void {
     this.activePage = "account";
     this.render();
+  }
+
+  // Declarative settings power the global settings search on Obsidian 1.13.0+.
+  // The imperative display() above stays for older hosts (minAppVersion 1.12.7);
+  // both paths read and persist the same four DocferrySettings fields.
+  override getSettingDefinitions(): SettingDefinitionItem[] {
+    return [
+      {
+        name: "Password by default",
+        desc: "Preselect password protection in the publish dialog.",
+        control: {
+          type: "toggle",
+          key: "defaultPasswordEnabled",
+          defaultValue: DEFAULT_SETTINGS.defaultPasswordEnabled
+        }
+      },
+      {
+        name: "Default expiration",
+        desc: "Used as the initial value in the publish dialog.",
+        control: {
+          type: "dropdown",
+          key: "defaultExpiresInDays",
+          options: { never: "Never", "30": "30 days" },
+          defaultValue: DEFAULT_SETTINGS.defaultExpiresInDays
+        }
+      },
+      {
+        name: "Default import folder",
+        desc: "Vault folder used by the DocFerry home page and import dialogs.",
+        control: {
+          type: "text",
+          key: "defaultImportFolder",
+          defaultValue: DEFAULT_SETTINGS.defaultImportFolder
+        }
+      },
+      {
+        name: "Debug logging",
+        desc: "Include extra details in the developer console for troubleshooting.",
+        control: {
+          type: "toggle",
+          key: "debug",
+          defaultValue: DEFAULT_SETTINGS.debug
+        }
+      }
+    ];
+  }
+
+  override getControlValue(key: string): unknown {
+    switch (key) {
+      case "defaultPasswordEnabled":
+        return this.host.docferrySettings.defaultPasswordEnabled;
+      case "defaultExpiresInDays":
+        return this.host.docferrySettings.defaultExpiresInDays;
+      case "defaultImportFolder":
+        return this.host.docferrySettings.defaultImportFolder;
+      case "debug":
+        return this.host.docferrySettings.debug;
+      default:
+        return undefined;
+    }
+  }
+
+  override async setControlValue(key: string, value: unknown): Promise<void> {
+    switch (key) {
+      case "defaultPasswordEnabled":
+        this.host.docferrySettings.defaultPasswordEnabled = value === true;
+        break;
+      case "defaultExpiresInDays":
+        this.host.docferrySettings.defaultExpiresInDays =
+          typeof value === "string" && value ? value : DEFAULT_SETTINGS.defaultExpiresInDays;
+        break;
+      case "defaultImportFolder":
+        this.host.docferrySettings.defaultImportFolder =
+          normalizeVaultFolder(value) || DEFAULT_SETTINGS.defaultImportFolder;
+        break;
+      case "debug":
+        this.host.docferrySettings.debug = value === true;
+        break;
+      default:
+        return;
+    }
+    await this.host.saveSettings();
   }
 
   private render(): void {
@@ -385,7 +467,9 @@ export class DocferrySettingTab extends PluginSettingTab {
       .setDesc("Remove this Bondie account from this Obsidian device.")
       .addButton((button) => {
         button.setButtonText("Disconnect");
-        button.setWarning();
+        // setWarning() is deprecated; setDestructive() requires Obsidian 1.13.0
+        // while minAppVersion is 1.12.7, so apply the same warning class directly.
+        button.buttonEl.addClass("mod-warning");
         button.setDisabled(!this.host.docferrySettings.sessionToken && !this.host.docferrySettings.connectedAccount);
         button.onClick(async () => {
           await this.host.disconnectAccount();

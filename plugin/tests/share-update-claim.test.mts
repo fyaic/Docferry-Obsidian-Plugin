@@ -24,7 +24,7 @@ test("claims only exact physical aliases or an explicitly selected relative sour
 
   // CLI shares may remember an absolute source path or, before vault identity
   // was added, the exact vault-relative path. Neither path may suffix-guess.
-  assert.match(mainSource, /vaultRelativeShareSourcePath\(share\.source_path, basePath, process\.platform === "win32"\)/);
+  assert.match(mainSource, /vaultRelativeShareSourcePath\(share\.source_path, basePath, isWindowsHost\(\)\)/);
   assert.match(mainSource, /resolvedBasePath !== basePath/);
   assert.match(mainSource, /explicitClaimSourceMatches\(/);
   assert.match(mainSource, /This historical Share does not belong to this vault's source note\./);

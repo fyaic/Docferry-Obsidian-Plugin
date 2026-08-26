@@ -24,7 +24,9 @@ test("UX-02: share edit and fixed dialogs are height-bounded with internal scrol
   assert.ok(ruleStart > -1, "the four dialogs must share one bounded rule");
   const rule = styles.slice(ruleStart, styles.indexOf("}", ruleStart));
   assert.match(rule, /max-height:\s*min\(86vh, 720px\)/);
-  assert.match(rule, /max-height:\s*min\(86dvh, 720px\)/);
+  // The Community CSS lint rejects duplicate properties, so the dvh fallback
+  // line was dropped; keep the single broadly supported vh declaration.
+  assert.doesNotMatch(rule, /max-height:[^;]+;\s*max-height:/);
   assert.match(rule, /overflow-y:\s*auto/);
 });
 

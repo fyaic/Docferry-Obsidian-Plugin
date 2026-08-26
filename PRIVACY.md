@@ -53,6 +53,16 @@ The bundled Tencent COS upload SDK may use browser local or session storage
 for temporary asset upload state. DocFerry account tokens are not stored there
 by the plugin.
 
+## Local file access
+
+DocFerry reads and writes vault files only through the Obsidian vault API. The
+single exception is `fs.realpath`, used to canonicalize the vault folder path
+(resolving symlinks or junctions) so a Share stays bound to the vault it was
+published from; no file content is read or written outside the vault API.
+Folder sharing and imports enumerate vault files through the Obsidian API to
+list candidates, and enumeration results never leave the device unless you
+publish or import the selected content.
+
 ## Hosted service
 
 DocFerry operates at `https://docferry.bondie.io`. Authentication and account

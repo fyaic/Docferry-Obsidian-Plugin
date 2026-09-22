@@ -96,6 +96,8 @@ test("reports asynchronous share action and clipboard failures", () => {
 
 test("opens plugin preferences on the account overview", () => {
   assert.match(settingsSource, /display\(\): void \{\s*this\.activePage = "account";\s*this\.render\(\);/);
+  // Non-empty native definitions replace the full page on Obsidian 1.13+.
+  assert.match(settingsSource, /getSettingDefinitions\(\): SettingDefinitionItem\[\] \{\s*return \[\];\s*\}/);
 });
 
 test("keeps shared content discoverable from plugin settings", () => {

@@ -6,8 +6,8 @@ runtime assets for the DocFerry desktop plugin.
 ## Candidate Status
 
 - Community plugin id: `docferry`
-- Candidate version: `0.0.72` (not tagged or published)
-- Latest published GitHub Release: `0.0.68`
+- Candidate version: `0.0.74` (draft pending product-team approval)
+- Latest published GitHub Release: `0.0.73`
 - Minimum desktop app version: `1.12.7`
 - Hosted service: `https://docferry.bondie.io`
 - Community classification: **Optional payments**
@@ -32,7 +32,13 @@ npm run check:release
 
 `plugin/main.js` is generated from `plugin/src`. The three runtime assets are
 `main.js`, `manifest.json`, and `styles.css`; a future release tag must exactly
-match the manifest version.
+match the manifest version. The tag workflow produces an attested draft for
+maintainer review, not an automatically published release.
+
+Version 0.0.74 restores the complete Account, Sharing, Imports, and Advanced
+pages on Obsidian 1.13+. The incomplete native search definitions from 0.0.73
+are withdrawn because they replaced the full page. Preferences remain editable
+in the plugin settings; this correction does not change stored data or login.
 
 ## Trust Boundary
 

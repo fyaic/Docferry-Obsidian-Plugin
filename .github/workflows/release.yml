@@ -80,12 +80,18 @@ jobs:
             release/manifest.json
             release/styles.css
 
-      - name: Prepare draft GitHub release for maintainer review
+      - name: Publish approved GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          draft: true
+          draft: false
+          prerelease: false
           body_path: release/RELEASE_NOTES.md
           files: |
             release/main.js
             release/manifest.json
             release/styles.css
+
+      - name: Verify published install assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/verify-published-release.mjs

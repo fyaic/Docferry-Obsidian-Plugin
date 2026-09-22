@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.75
+
+- Publish a matching non-draft release so Community review can download the
+  version declared by the default-branch manifest.
+- Retain the settings recovery and patched dependency locks from the
+  unpublished 0.0.74 candidate, without changing its runtime bundle.
+- Verify the published tag, stable plugin ID, manifest, and downloaded
+  installation assets after release creation.
+
 ## 0.0.74 (review candidate)
 
 - Restore the complete Account, Sharing, Imports, and Advanced settings pages

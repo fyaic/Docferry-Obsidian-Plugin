@@ -23,6 +23,11 @@ assert(JSON.stringify(rootVersions) === JSON.stringify(pluginVersions), "Root an
 assert(/^\d+\.\d+\.\d+$/.test(rootManifest.version), "Manifest version is not SemVer x.y.z");
 assert(rootManifest.version === rootPackage.version, "Root package version differs from manifest");
 assert(rootManifest.version === pluginPackage.version, "Plugin package version differs from manifest");
+for (const path of ["package-lock.json", "plugin/package-lock.json"]) {
+  const lock = json(path);
+  assert(lock.version === rootManifest.version, `${path} version differs from manifest`);
+  assert(lock.packages?.[""]?.version === rootManifest.version, `${path} root package version differs from manifest`);
+}
 assert(rootVersions[rootManifest.version] === rootManifest.minAppVersion, "Version map is missing this release");
 assert(rootManifest.author === "Bondie", "Public manifest must use current product authorship");
 assert(rootManifest.authorUrl === "https://bondie.io", "Public manifest author URL is stale");

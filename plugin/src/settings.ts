@@ -147,86 +147,10 @@ export class DocferrySettingTab extends PluginSettingTab {
     this.render();
   }
 
-  // Declarative settings power the global settings search on Obsidian 1.13.0+.
-  // The imperative display() above stays for older hosts (minAppVersion 1.12.7);
-  // both paths read and persist the same four DocferrySettings fields.
+  // A non-empty definition list replaces display() on Obsidian 1.13+.
+  // Keep the complete account/sharing/imports UI on every supported host.
   override getSettingDefinitions(): SettingDefinitionItem[] {
-    return [
-      {
-        name: "Password by default",
-        desc: "Preselect password protection in the publish dialog.",
-        control: {
-          type: "toggle",
-          key: "defaultPasswordEnabled",
-          defaultValue: DEFAULT_SETTINGS.defaultPasswordEnabled
-        }
-      },
-      {
-        name: "Default expiration",
-        desc: "Used as the initial value in the publish dialog.",
-        control: {
-          type: "dropdown",
-          key: "defaultExpiresInDays",
-          options: { never: "Never", "30": "30 days" },
-          defaultValue: DEFAULT_SETTINGS.defaultExpiresInDays
-        }
-      },
-      {
-        name: "Default import folder",
-        desc: "Vault folder used by the DocFerry home page and import dialogs.",
-        control: {
-          type: "text",
-          key: "defaultImportFolder",
-          defaultValue: DEFAULT_SETTINGS.defaultImportFolder
-        }
-      },
-      {
-        name: "Debug logging",
-        desc: "Include extra details in the developer console for troubleshooting.",
-        control: {
-          type: "toggle",
-          key: "debug",
-          defaultValue: DEFAULT_SETTINGS.debug
-        }
-      }
-    ];
-  }
-
-  override getControlValue(key: string): unknown {
-    switch (key) {
-      case "defaultPasswordEnabled":
-        return this.host.docferrySettings.defaultPasswordEnabled;
-      case "defaultExpiresInDays":
-        return this.host.docferrySettings.defaultExpiresInDays;
-      case "defaultImportFolder":
-        return this.host.docferrySettings.defaultImportFolder;
-      case "debug":
-        return this.host.docferrySettings.debug;
-      default:
-        return undefined;
-    }
-  }
-
-  override async setControlValue(key: string, value: unknown): Promise<void> {
-    switch (key) {
-      case "defaultPasswordEnabled":
-        this.host.docferrySettings.defaultPasswordEnabled = value === true;
-        break;
-      case "defaultExpiresInDays":
-        this.host.docferrySettings.defaultExpiresInDays =
-          typeof value === "string" && value ? value : DEFAULT_SETTINGS.defaultExpiresInDays;
-        break;
-      case "defaultImportFolder":
-        this.host.docferrySettings.defaultImportFolder =
-          normalizeVaultFolder(value) || DEFAULT_SETTINGS.defaultImportFolder;
-        break;
-      case "debug":
-        this.host.docferrySettings.debug = value === true;
-        break;
-      default:
-        return;
-    }
-    await this.host.saveSettings();
+    return [];
   }
 
   private render(): void {

@@ -80,9 +80,10 @@ jobs:
             release/manifest.json
             release/styles.css
 
-      - name: Publish GitHub release
+      - name: Prepare draft GitHub release for maintainer review
         uses: softprops/action-gh-release@v2
         with:
+          draft: true
           body_path: release/RELEASE_NOTES.md
           files: |
             release/main.js

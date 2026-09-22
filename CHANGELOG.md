@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.0.74 (review candidate)
+
+- Restore the complete Account, Sharing, Imports, and Advanced settings pages
+  on Obsidian 1.13+, including sign-in, membership, and Shares navigation.
+- Withdraw the four incomplete native search definitions introduced in 0.0.73:
+  the host used them instead of rendering the complete settings page.
+- Preserve existing settings, session storage, plugin ID, and minimum host
+  version. No data migration or new network destination is introduced.
+- Prepare attested release assets as a draft for product-team approval.
+- Patch affected XML parser and build-review dependency locks; validate lockfile
+  version metadata along with manifests and packages.
+
 ## 0.0.73
 
 - Resolve the Obsidian Community review warnings from the 0.0.72 scan:

@@ -14,9 +14,9 @@ sign in with a Bondie account in your system browser, and work from one simple
 home page. No server deployment, model key, or provider configuration is
 required.
 
-> **Review candidate:** `0.0.74` restores the complete settings pages on
-> Obsidian 1.13+. The latest published version is `0.0.73`; the correction is
-> prepared as a draft pending product-team approval. The plugin ID remains
+> **Community correction:** `0.0.75` includes the complete settings-page
+> restoration on Obsidian 1.13+ and uses a matching published GitHub Release,
+> not the superseded `0.0.74` draft. The plugin ID remains
 > `docferry`, with no configuration reset or forced sign-in for this update.
 > Users upgrading from the retired free-service client should read the
 > [migration guide](docs/MIGRATION-FROM-FREE.md).
@@ -144,10 +144,10 @@ npm run check:release
 `check:release` runs the official-style ESLint rules, the client test suite, a clean
 TypeScript bundle, `node --check`, metadata and license checks, domain-boundary
 checks, and a public-source scan. The release workflow rebuilds from source and
-attests `main.js`, `manifest.json`, and `styles.css` into a draft release.
-Maintainers review the [0.0.74 checklist](docs/reviews/0.0.74.md) before
-publishing. Publishing a GitHub release can trigger automatic Community review;
-preparing a draft is not approval or submission by the product team.
+attests `main.js`, `manifest.json`, and `styles.css` before publication.
+After publication it downloads and verifies all three assets against the build.
+See the [0.0.75 checklist](docs/reviews/0.0.75.md). Publishing a GitHub release
+triggers automatic Community review; this is not a claim that review passed.
 
 The hosted backend, provider configuration, billing infrastructure, operator
 tools, and production secrets are intentionally not part of this public client
